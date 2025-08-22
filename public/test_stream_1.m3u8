@@ -1,0 +1,14 @@
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:8
+#EXT-X-MEDIA-SEQUENCE:248
+#EXTINF:8.333333,
+test_stream_1248.ts
+#EXTINF:8.333333,
+test_stream_1249.ts
+#EXTINF:8.333333,
+test_stream_1250.ts
+#EXTINF:8.333333,
+test_stream_1251.ts
+#EXTINF:6.433333,
+test_stream_1252.ts
