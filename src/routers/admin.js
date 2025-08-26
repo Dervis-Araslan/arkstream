@@ -29,6 +29,9 @@ router.use(loadUser);
 router.use(express.json());
 router.use(express.urlencoded({ extended: true }));
 
+const { getStreamService } = require('../services/stream');
+const streamService = getStreamService();
+
 // Login page
 router.get('/login', (req, res) => {
     if (req.session && req.session.userId) {
@@ -925,89 +928,93 @@ router.post('/api/streams/:id/start', requireAuth, async (req, res) => {
             });
         }
 
-        if (activeStreams[stream.stream_name]) {
+        // Stream zaten aktif mi?
+        if (streamService.isStreamActive(stream.stream_name)) {
             return res.status(400).json({
                 success: false,
                 message: 'Bu yayın zaten aktif'
             });
         }
 
-        // RTSP URL oluştur
-        const rtspUrl = stream.generateRTSPUrl();
+        // Stream config hazırla
+        const streamConfig = {
+            streamName: stream.stream_name,
+            brand: stream.camera.brand,
+            username: stream.username,
+            password: stream.password,
+            ip: stream.ip_address,
+            port: stream.rtsp_port,
+            channel: stream.channel,
+            resolution: stream.resolution,
+            fps: stream.fps,
+            bitrate: stream.bitrate,
+            audioBitrate: stream.audio_bitrate
+        };
 
-        // HLS çıktısı yolu
-        const hlsPath = path.join(__dirname, '../public', `${stream.stream_name}.m3u8`);
-
-        // FFmpeg argümanları
-        const ffmpegArgs = [
-            '-rtsp_transport', 'tcp',
-            '-fflags', '+genpts',
-            '-use_wallclock_as_timestamps', '1',
-            '-i', rtspUrl,
-            '-pix_fmt', 'yuv420p',
-            '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency',
-            '-b:v', stream.bitrate, '-r', stream.fps.toString(), '-s', stream.resolution,
-            '-c:a', 'aac', '-b:a', stream.audio_bitrate, '-ar', '44100',
-            '-f', 'hls', '-hls_time', '1', '-hls_list_size', '5',
-            '-hls_flags', 'delete_segments+append_list+omit_endlist',
-            hlsPath
-        ];
-
-        console.log(`[${stream.camera.brand}] Starting FFmpeg for ${stream.stream_name}: ${rtspUrl}`);
-
-        // Durumu güncelle
+        // Database durumunu güncelle - starting
         await stream.update({
             status: 'starting',
             last_started: new Date(),
             error_message: null
         });
 
-        // FFmpeg sürecini başlat
-        const ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
+        try {
+            // Stream servisini başlat
+            const result = await streamService.startStream(streamConfig);
 
-        ffmpegProcess.stderr.on('data', data => {
-            console.error(`[FFmpeg ${stream.stream_name}] ${data.toString()}`);
-        });
+            // Callback'leri ayarla - database güncellemeleri için
+            streamService.setStreamCallbacks(stream.stream_name, {
+                onClose: async (code) => {
+                    await stream.update({
+                        status: code === 0 ? 'stopped' : 'error',
+                        last_stopped: new Date(),
+                        error_message: code !== 0 ? `FFmpeg exited with code ${code}` : null,
+                        process_id: null
+                    });
+                },
+                onError: async (error) => {
+                    await stream.update({
+                        status: 'error',
+                        error_message: error.message,
+                        process_id: null
+                    });
+                }
+            });
 
-        ffmpegProcess.on('close', async (code) => {
-            console.log(`[FFmpeg ${stream.stream_name}] exited with code ${code}`);
-            delete activeStreams[stream.stream_name];
-
+            // Database'de final durumu güncelle
             await stream.update({
-                status: code === 0 ? 'stopped' : 'error',
-                last_stopped: new Date(),
-                error_message: code !== 0 ? `FFmpeg exited with code ${code}` : null,
+                status: 'streaming',
+                process_id: result.pid,
+                hls_url: `http://localhost:${process.env.PORT || 3000}${result.hlsUrl}`
+            });
+
+            res.json({
+                success: true,
+                message: 'Yayın başlatıldı',
+                data: {
+                    stream_name: stream.stream_name,
+                    hls_url: `http://localhost:${process.env.PORT || 3000}${result.hlsUrl}`,
+                    status: 'streaming',
+                    pid: result.pid
+                }
+            });
+
+        } catch (streamError) {
+            // Stream başlatma hatası - database'i güncelle
+            await stream.update({
+                status: 'error',
+                error_message: streamError.message,
                 process_id: null
             });
-        });
 
-        // Başarılı başlatma için timeout
-        setTimeout(async () => {
-            if (activeStreams[stream.stream_name]) {
-                await stream.update({ status: 'streaming' });
-            }
-        }, 3000);
+            throw streamError;
+        }
 
-        activeStreams[stream.stream_name] = ffmpegProcess;
-
-        await stream.update({
-            process_id: ffmpegProcess.pid
-        });
-
-        res.json({
-            success: true,
-            message: 'Yayın başlatıldı',
-            data: {
-                stream_name: stream.stream_name,
-                hls_url: stream.hls_url,
-                status: 'starting'
-            }
-        });
     } catch (error) {
         console.error('Stream start error:', error);
         res.status(500).json({
             success: false,
-            message: 'Yayın başlatılırken bir hata oluştu'
+            message: 'Yayın başlatılırken bir hata oluştu: ' + error.message
         });
     }
 });
@@ -1025,34 +1032,107 @@ router.post('/api/streams/:id/stop', requireAuth, async (req, res) => {
             });
         }
 
-        const ffmpegProcess = activeStreams[stream.stream_name];
-        if (!ffmpegProcess) {
+        // Stream aktif değilse
+        if (!streamService.isStreamActive(stream.stream_name)) {
             return res.status(400).json({
                 success: false,
-                message: 'Bu yayın aktif değil'
+                message: 'Bu yayın zaten aktif değil'
             });
         }
 
-        // FFmpeg sürecini durdur
-        ffmpegProcess.kill('SIGKILL');
-        delete activeStreams[stream.stream_name];
+        try {
+            // Stream servisini durdur
+            await streamService.stopStream(stream.stream_name);
 
-        await stream.update({
-            status: 'stopped',
-            last_stopped: new Date(),
-            process_id: null,
-            error_message: null
-        });
+            // Database'i güncelle
+            await stream.update({
+                status: 'stopped',
+                last_stopped: new Date(),
+                process_id: null,
+                error_message: null
+            });
 
-        res.json({
-            success: true,
-            message: 'Yayın durduruldu'
-        });
+            res.json({
+                success: true,
+                message: 'Yayın durduruldu'
+            });
+
+        } catch (streamError) {
+            // Stream durdurma hatası
+            await stream.update({
+                status: 'error',
+                error_message: streamError.message
+            });
+
+            throw streamError;
+        }
+
     } catch (error) {
         console.error('Stream stop error:', error);
         res.status(500).json({
             success: false,
-            message: 'Yayın durdurulurken bir hata oluştu'
+            message: 'Yayın durdurulurken bir hata oluştu: ' + error.message
+        });
+    }
+});
+
+router.get('/api/streams/:id/status', requireAuth, async (req, res) => {
+    try {
+        const streamId = req.params.id;
+        const stream = await Stream.findByPk(streamId);
+
+        if (!stream) {
+            return res.status(404).json({
+                success: false,
+                message: 'Yayın bulunamadı'
+            });
+        }
+
+        // Stream service'den gerçek durumu al
+        const streamStatus = streamService.getStreamStatus(stream.stream_name);
+
+        if (streamStatus) {
+            // Database ile senkronize et
+            if (stream.status !== streamStatus.status) {
+                await stream.update({ status: streamStatus.status });
+            }
+        }
+
+        res.json({
+            success: true,
+            data: {
+                database_status: stream.status,
+                service_status: streamStatus,
+                last_started: stream.last_started,
+                last_stopped: stream.last_stopped,
+                hls_url: stream.hls_url
+            }
+        });
+
+    } catch (error) {
+        console.error('Stream status error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Stream durumu alınırken bir hata oluştu'
+        });
+    }
+});
+
+// Tüm aktif stream'leri listele
+router.get('/api/streams/active', requireAuth, async (req, res) => {
+    try {
+        const activeStreams = streamService.getActiveStreams();
+
+        res.json({
+            success: true,
+            data: activeStreams
+        });
+
+    } catch (error) {
+        console.error('Active streams error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Aktif stream listesi alınırken bir hata oluştu'
         });
     }
 });
@@ -1108,13 +1188,12 @@ router.put('/api/streams/:id', upload.none(), requireAuth, async (req, res) => {
             });
         }
 
-        await stream.update({
+        const updateData = {
             stream_name: stream_name.trim(),
             camera_id,
             ip_address: ip_address.trim(),
             rtsp_port: rtsp_port ? parseInt(rtsp_port) : 554,
             username: username.trim(),
-            password: password.trim(),
             channel: channel ? parseInt(channel) : 1,
             resolution: resolution || '640x480',
             fps: fps ? parseInt(fps) : 30,
@@ -1123,7 +1202,14 @@ router.put('/api/streams/:id', upload.none(), requireAuth, async (req, res) => {
             is_active: is_active === 'on' || is_active === true || is_active === '1' || is_active === 'true',
             is_recording: is_recording === 'on' || is_recording === true || is_recording === '1' || is_recording === 'true',
             hls_url: `http://localhost:8080/${stream_name.trim()}.m3u8`
-        });
+        };
+
+        // DÜZELTME: Şifre sadece dolu gelirse güncelle
+        if (password && password.trim() !== '') {
+            updateData.password = password.trim();
+        }
+
+        await stream.update(updateData);
 
         res.json({
             success: true,

@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kamera Yayın İzleyici</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+
+        .video-container {
+            position: relative;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        #video {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .stream-info {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+        }
+
+        .stream-info h3 {
+            margin-top: 0;
+            color: #495057;
+        }
+
+        .stream-info p {
+            margin: 5px 0;
+            color: #6c757d;
+        }
+
+        .url-input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-family: monospace;
+            margin-bottom: 10px;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                margin: 10px;
+                padding: 15px;
+            }
+
+            .controls {
+                flex-direction: column;
+            }
+
+            button {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🎥 Kamera Yayın İzleyici</h1>
+
+        <div id="status" class="status info">
+            Bağlantı bekleniyor...
+        </div>
+
+        <div class="controls">
+            <input type="text" id="streamUrl" class="url-input" value="http://localhost:3000/public/kamera2.m3u8"
+                placeholder="HLS Stream URL'si girin">
+            <button onclick="loadStream()">Yayın Yükle</button>
+            <button onclick="playStream()">Oynat</button>
+            <button onclick="pauseStream()">Duraklat</button>
+            <button onclick="stopStream()">Durdur</button>
+            <button onclick="toggleMute()">Ses Aç/Kapat</button>
+            <button onclick="toggleFullscreen()">Tam Ekran</button>
+        </div>
+
+        <div class="video-container">
+            <video id="video" controls
+                poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='600'%3E%3Crect width='100%25' height='100%25' fill='%23333'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' fill='white' font-size='24' dy='.3em'%3EKamera Yayını Yükleniyor...%3C/text%3E%3C/svg%3E">
+                Tarayıcınız HTML5 video desteklemiyor.
+            </video>
+        </div>
+
+        <div class="stream-info">
+            <h3>📊 Yayın Bilgileri</h3>
+            <p><strong>Durum:</strong> <span id="streamStatus">Bekleniyor</span></p>
+            <p><strong>Çözünürlük:</strong> <span id="streamResolution">-</span></p>
+            <p><strong>Kalite:</strong> <span id="streamQuality">-</span></p>
+            <p><strong>Süre:</strong> <span id="streamDuration">-</span></p>
+            <p><strong>Tampon Durumu:</strong> <span id="bufferStatus">-</span></p>
+        </div>
+    </div>
+
+    <script>
+        let hls = null;
+        let video = document.getElementById('video');
+        let isStreamLoaded = false;
+
+        function updateStatus(message, type = 'info') {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status ${type}`;
+        }
+
+        function updateStreamInfo() {
+            const streamStatus = document.getElementById('streamStatus');
+            const streamResolution = document.getElementById('streamResolution');
+            const streamQuality = document.getElementById('streamQuality');
+            const streamDuration = document.getElementById('streamDuration');
+            const bufferStatus = document.getElementById('bufferStatus');
+
+            if (video.videoWidth && video.videoHeight) {
+                streamResolution.textContent = `${video.videoWidth}x${video.videoHeight}`;
+            }
+
+            if (video.duration && !isNaN(video.duration)) {
+                const minutes = Math.floor(video.duration / 60);
+                const seconds = Math.floor(video.duration % 60);
+                streamDuration.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            }
+
+            if (video.readyState >= 2) {
+                streamStatus.textContent = video.paused ? 'Duraklatıldı' : 'Oynatılıyor';
+
+                const buffered = video.buffered;
+                if (buffered.length > 0) {
+                    const bufferEnd = buffered.end(buffered.length - 1);
+                    const bufferPercent = Math.round((bufferEnd / video.duration) * 100);
+                    bufferStatus.textContent = `%${bufferPercent}`;
+                }
+            }
+        }
+
+        function loadStream() {
+            const url = document.getElementById('streamUrl').value.trim();
+
+            if (!url) {
+                updateStatus('Lütfen geçerli bir URL girin', 'error');
+                return;
+            }
+
+            updateStatus('Yayın yükleniyor...', 'info');
+
+            // Önceki stream'i temizle
+            if (hls) {
+                hls.destroy();
+                hls = null;
+            }
+
+            if (Hls.isSupported()) {
+                hls = new Hls({
+                    debug: false,
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                    liveSyncDuration: 2,
+                    liveMaxLatencyDuration: 8,
+                    maxBufferLength: 10
+                });
+
+                hls.loadSource(url);
+                hls.attachMedia(video);
+
+                hls.on(Hls.Events.MANIFEST_PARSED, function () {
+                    updateStatus('Yayın başarıyla yüklendi', 'success');
+                    isStreamLoaded = true;
+
+                    // Otomatik oynatmaya çalış
+                    video.play().catch(e => {
+                        updateStatus('Otomatik oynatma başarısız - manuel oynatın', 'info');
+                    });
+                });
+
+                hls.on(Hls.Events.ERROR, function (event, data) {
+                    console.error('HLS Error:', data);
+
+                    if (data.fatal) {
+                        switch (data.type) {
+                            case Hls.ErrorTypes.NETWORK_ERROR:
+                                updateStatus('Ağ bağlantı hatası - yeniden denenecek', 'error');
+                                hls.startLoad();
+                                break;
+                            case Hls.ErrorTypes.MEDIA_ERROR:
+                                updateStatus('Medya hatası - kurtarılmaya çalışılıyor', 'error');
+                                hls.recoverMediaError();
+                                break;
+                            default:
+                                updateStatus('Kurtarılamaz hata oluştu', 'error');
+                                break;
+                        }
+                    }
+                });
+
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Safari için native HLS desteği
+                video.src = url;
+                updateStatus('Safari native HLS kullanılıyor', 'success');
+                isStreamLoaded = true;
+            } else {
+                updateStatus('HLS desteği bulunamadı', 'error');
+            }
+        }
+
+        function playStream() {
+            if (isStreamLoaded) {
+                video.play();
+            } else {
+                updateStatus('Önce yayın yüklenmeli', 'error');
+            }
+        }
+
+        function pauseStream() {
+            video.pause();
+        }
+
+        function stopStream() {
+            video.pause();
+            video.currentTime = 0;
+            updateStatus('Yayın durduruldu', 'info');
+        }
+
+        function toggleMute() {
+            video.muted = !video.muted;
+        }
+
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                video.requestFullscreen().catch(err => {
+                    console.log('Tam ekran hatası:', err);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        // Video event listeners
+        video.addEventListener('loadstart', () => updateStreamInfo());
+        video.addEventListener('loadedmetadata', () => updateStreamInfo());
+        video.addEventListener('play', () => updateStreamInfo());
+        video.addEventListener('pause', () => updateStreamInfo());
+        video.addEventListener('timeupdate', () => updateStreamInfo());
+        video.addEventListener('progress', () => updateStreamInfo());
+
+        // Sayfa yüklendiğinde otomatik yükle
+        document.addEventListener('DOMContentLoaded', function () {
+            // 2 saniye bekle ve otomatik yükle
+            setTimeout(() => {
+                loadStream();
+            }, 2000);
+        });
+    </script>
+</body>
+
+</html>
