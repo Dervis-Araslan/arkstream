@@ -1,224 +1,263 @@
-module.exports = (sequelize, DataTypes) => {
-    const Camera = sequelize.define('Camera', {
-        id: {
-            type: DataTypes.INTEGER,
-            primaryKey: true,
-            autoIncrement: true
-        },
-        name: {
-            type: DataTypes.STRING(100),
-            allowNull: false,
-            validate: {
-                notEmpty: true,
-                len: [2, 100]
-            }
-        },
-        brand: {
-            type: DataTypes.ENUM('samsung', 'dahua', 'hikvision', 'axis', 'bosch', 'other'),
-            allowNull: false,
-            validate: {
-                isIn: [['samsung', 'dahua', 'hikvision', 'axis', 'bosch', 'other']]
-            }
-        },
-        model: {
-            type: DataTypes.STRING(100),
-            allowNull: false,
-            validate: {
-                notEmpty: true,
-                len: [1, 100]
-            }
-        },
-        ip: {
-            type: DataTypes.STRING(45),
-            allowNull: false,
-            validate: {
-                isIP: true
-            }
-        },
-        port: {
-            type: DataTypes.INTEGER,
-            allowNull: false,
-            defaultValue: 554,
-            validate: {
-                min: 1,
-                max: 65535
-            }
-        },
-        username: {
-            type: DataTypes.STRING(50),
-            allowNull: false,
-            validate: {
-                notEmpty: true,
-                len: [1, 50]
-            }
-        },
-        password: {
-            type: DataTypes.STRING(100),
-            allowNull: false,
-            validate: {
-                notEmpty: true,
-                len: [1, 100]
-            }
-        },
-        location: {
-            type: DataTypes.STRING(200),
-            allowNull: true,
-            validate: {
-                len: [0, 200]
-            }
-        },
-        description: {
-            type: DataTypes.TEXT,
-            allowNull: true
-        },
-        resolution: {
-            type: DataTypes.STRING(20),
-            allowNull: true,
-            defaultValue: '1920x1080',
-            validate: {
-                is: /^\d+x\d+$/
-            }
-        },
-        fps: {
-            type: DataTypes.INTEGER,
-            allowNull: true,
-            defaultValue: 30,
-            validate: {
-                min: 1,
-                max: 120
-            }
-        },
-        status: {
-            type: DataTypes.ENUM('active', 'inactive', 'maintenance', 'offline'),
-            allowNull: false,
-            defaultValue: 'active',
-            validate: {
-                isIn: [['active', 'inactive', 'maintenance', 'offline']]
-            }
-        },
-        lastPing: {
-            type: DataTypes.DATE,
-            allowNull: true
-        },
-        isOnline: {
-            type: DataTypes.BOOLEAN,
-            allowNull: false,
-            defaultValue: false
-        },
-        connectionAttempts: {
-            type: DataTypes.INTEGER,
-            allowNull: false,
-            defaultValue: 0
-        },
-        lastError: {
-            type: DataTypes.TEXT,
-            allowNull: true
-        },
-        metadata: {
-            type: DataTypes.JSON,
-            allowNull: true,
-            comment: 'Ek kamera bilgileri için JSON field'
+// Camera Model - Basit kamera bilgileri
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/database');
+
+const Camera = sequelize.define('Camera', {
+    id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true
+    },
+    name: {
+        type: DataTypes.STRING(100),
+        allowNull: false,
+        unique: true,
+        validate: {
+            len: [2, 100],
+            notEmpty: true
         }
-    }, {
-        tableName: 'cameras',
-        timestamps: true,
-        paranoid: true, // Soft delete için
-        indexes: [
-            {
-                unique: true,
-                fields: ['ip', 'port'],
-                name: 'unique_ip_port'
-            },
-            {
-                fields: ['brand'],
-                name: 'idx_camera_brand'
-            },
-            {
-                fields: ['status'],
-                name: 'idx_camera_status'
-            },
-            {
-                fields: ['isOnline'],
-                name: 'idx_camera_online'
-            },
-            {
-                fields: ['location'],
-                name: 'idx_camera_location'
-            }
-        ],
-        hooks: {
-            beforeValidate: (camera, options) => {
-                // IP ve port kombinasyonunu kontrol et
-                if (camera.ip && camera.port) {
-                    camera.ip = camera.ip.trim();
-                }
-            },
-            beforeCreate: (camera, options) => {
-                camera.connectionAttempts = 0;
-                camera.isOnline = false;
-            }
+    },
+    brand: {
+        type: DataTypes.STRING(50),
+        allowNull: false,
+        validate: {
+            len: [2, 50],
+            notEmpty: true
         }
-    });
-
-    // Instance methods
-    Camera.prototype.generateRtspUrl = function (channel = 1) {
-        let rtspUrl;
-
-        switch (this.brand.toLowerCase()) {
-            case 'dahua':
-                rtspUrl = `rtsp://${this.username}:${this.password}@${this.ip}:${this.port}/cam/realmonitor?channel=${channel}&subtype=0`;
-                break;
-            case 'samsung':
-                rtspUrl = `rtsp://${this.username}:${this.password}@${this.ip}:${this.port}/profile1/media.smp`;
-                break;
-            case 'hikvision':
-                rtspUrl = `rtsp://${this.username}:${this.password}@${this.ip}:${this.port}/Streaming/Channels/${channel}01`;
-                break;
-            case 'axis':
-                rtspUrl = `rtsp://${this.username}:${this.password}@${this.ip}:${this.port}/axis-media/media.amp?camera=${channel}`;
-                break;
-            case 'bosch':
-                rtspUrl = `rtsp://${this.username}:${this.password}@${this.ip}:${this.port}/rtsp_tunnel?h26x=4&line=${channel}`;
-                break;
-            default:
-                rtspUrl = `rtsp://${this.username}:${this.password}@${this.ip}:${this.port}/stream${channel}`;
+    },
+    model: {
+        type: DataTypes.STRING(50),
+        allowNull: false,
+        validate: {
+            len: [2, 50],
+            notEmpty: true
         }
+    },
+    description: {
+        type: DataTypes.TEXT,
+        allowNull: true
+    },
+    is_active: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: true
+    }
+}, {
+    tableName: 'cameras',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at'
+});
 
-        return rtspUrl;
-    };
-
-    Camera.prototype.updateConnectionStatus = async function (isOnline, error = null) {
-        this.isOnline = isOnline;
-        this.lastPing = new Date();
-
-        if (isOnline) {
-            this.connectionAttempts = 0;
-            this.lastError = null;
-        } else {
-            this.connectionAttempts += 1;
-            this.lastError = error;
+// Stream Model - Yayın bilgileri
+const Stream = sequelize.define('Stream', {
+    id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true
+    },
+    stream_name: {
+        type: DataTypes.STRING(100),
+        allowNull: false,
+        unique: true,
+        validate: {
+            len: [2, 100],
+            notEmpty: true,
+            // Sadece alfanumerik ve - _ karakterlerine izin ver
+            is: /^[a-zA-Z0-9_-]+$/
         }
+    },
+    camera_id: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        references: {
+            model: Camera,
+            key: 'id'
+        }
+    },
+    ip_address: {
+        type: DataTypes.STRING(15),
+        allowNull: false,
+        validate: {
+            isIP: true,
+            notEmpty: true
+        }
+    },
+    rtsp_port: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 554,
+        validate: {
+            min: 1,
+            max: 65535
+        }
+    },
+    username: {
+        type: DataTypes.STRING(50),
+        allowNull: false,
+        validate: {
+            notEmpty: true
+        }
+    },
+    password: {
+        type: DataTypes.STRING(255),
+        allowNull: false,
+        validate: {
+            notEmpty: true
+        }
+    },
+    channel: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 1,
+        validate: {
+            min: 1,
+            max: 16
+        }
+    },
+    // Yayın ayarları
+    resolution: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        defaultValue: '640x480'
+    },
+    fps: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: 30,
+        validate: {
+            min: 1,
+            max: 60
+        }
+    },
+    bitrate: {
+        type: DataTypes.STRING(10),
+        allowNull: true,
+        defaultValue: '800k'
+    },
+    audio_bitrate: {
+        type: DataTypes.STRING(10),
+        allowNull: true,
+        defaultValue: '160k'
+    },
+    // Durum bilgileri
+    status: {
+        type: DataTypes.ENUM('stopped', 'starting', 'streaming', 'error'),
+        defaultValue: 'stopped'
+    },
+    is_active: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: true
+    },
+    is_recording: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false
+    },
+    last_started: {
+        type: DataTypes.DATE,
+        allowNull: true
+    },
+    last_stopped: {
+        type: DataTypes.DATE,
+        allowNull: true
+    },
+    error_message: {
+        type: DataTypes.TEXT,
+        allowNull: true
+    },
+    // FFmpeg process ID (gerekirse)
+    process_id: {
+        type: DataTypes.INTEGER,
+        allowNull: true
+    },
+    // HLS URL
+    hls_url: {
+        type: DataTypes.STRING(255),
+        allowNull: true
+    }
+}, {
+    tableName: 'streams',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at',
+    indexes: [
+        {
+            fields: ['camera_id']
+        },
+        {
+            fields: ['stream_name']
+        },
+        {
+            fields: ['status']
+        }
+    ]
+});
 
-        await this.save();
-    };
+// İlişkiler
+Camera.hasMany(Stream, {
+    foreignKey: 'camera_id',
+    as: 'streams'
+});
 
-    // Class methods
-    Camera.getOnlineCameras = function () {
-        return this.findAll({
-            where: {
-                isOnline: true,
-                status: 'active'
-            }
-        });
-    };
+Stream.belongsTo(Camera, {
+    foreignKey: 'camera_id',
+    as: 'camera'
+});
 
-    Camera.getCamerasByBrand = function (brand) {
-        return this.findAll({
-            where: {
-                brand: brand
-            }
-        });
-    };
-
-    return Camera;
+// Instance methods
+Camera.prototype.toJSON = function () {
+    const values = Object.assign({}, this.get());
+    return values;
 };
+
+Stream.prototype.toJSON = function () {
+    const values = Object.assign({}, this.get());
+    // Güvenlik için şifreyi gizle
+    delete values.password;
+    return values;
+};
+
+// Stream için RTSP URL oluşturma metodu
+Stream.prototype.generateRTSPUrl = function () {
+    const brand = this.camera ? this.camera.brand.toLowerCase() : '';
+
+    if (brand === 'dahua') {
+        return `rtsp://${this.username}:${this.password}@${this.ip_address}:${this.rtsp_port}/cam/realmonitor?channel=${this.channel}&subtype=0`;
+    } else if (brand === 'samsung') {
+        return `rtsp://${this.username}:${this.password}@${this.ip_address}:${this.rtsp_port}/profile1/media.smp`;
+    } else if (brand === 'hikvision') {
+        return `rtsp://${this.username}:${this.password}@${this.ip_address}:${this.rtsp_port}/Streaming/Channels/${this.channel}01/`;
+    } else {
+        // Generic RTSP URL
+        return `rtsp://${this.username}:${this.password}@${this.ip_address}:${this.rtsp_port}/`;
+    }
+};
+
+// Static methods
+Camera.getWithStreamCounts = async function () {
+    return await this.findAll({
+        include: [{
+            model: Stream,
+            as: 'streams',
+            attributes: []
+        }],
+        attributes: [
+            'id', 'name', 'brand', 'model', 'is_active',
+            [sequelize.fn('COUNT', sequelize.col('streams.id')), 'stream_count']
+        ],
+        group: ['Camera.id']
+    });
+};
+
+Stream.getActiveStreams = async function () {
+    return await this.findAll({
+        where: {
+            status: ['streaming', 'starting']
+        },
+        include: [{
+            model: Camera,
+            as: 'camera'
+        }]
+    });
+};
+
+module.exports = { Camera, Stream };
