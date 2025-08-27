@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const session = require('express-session');
 const { requireAuth, requireAdmin, loadUser } = require('../middleware/auth');
 const { Op } = require('sequelize');
+const os = require('os');
 const multer = require('multer'); // Form data için gerekli
 const { User, Camera, Stream } = require('../models');
 
@@ -10,6 +11,7 @@ const router = express.Router();
 const activeStreams = {};
 // Multer middleware for form data handling
 const upload = multer();
+const SERVER_HOST = process.env.SERVER_HOST + ":" + process.env.PORT || getServerIp() + ":" + + process.env.PORT;
 
 // Session middleware for admin panel
 router.use(session({
@@ -893,7 +895,7 @@ router.post('/api/streams/create', upload.none(), requireAuth, async (req, res) 
             audio_bitrate: audio_bitrate || '160k',
             is_active: is_active === 'on' || is_active === true || is_active === '1' || is_active === 'true',
             is_recording: is_recording === 'on' || is_recording === true || is_recording === '1' || is_recording === 'true',
-            hls_url: `http://localhost:8080/${stream_name.trim()}.m3u8`
+            hls_url: `${SERVER_HOST}/static/${stream_name.trim()}.m3u8`
         });
 
         res.json({
@@ -910,6 +912,17 @@ router.post('/api/streams/create', upload.none(), requireAuth, async (req, res) 
     }
 });
 
+function getServerIp() {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name]) {
+            if (iface.family === 'IPv4' && !iface.internal) {
+                return iface.address;
+            }
+        }
+    }
+    return 'localhost';
+}
 // Stream başlatma
 router.post('/api/streams/:id/start', requireAuth, async (req, res) => {
     try {
@@ -985,7 +998,7 @@ router.post('/api/streams/:id/start', requireAuth, async (req, res) => {
             await stream.update({
                 status: 'streaming',
                 process_id: result.pid,
-                hls_url: `http://localhost:${process.env.PORT || 3000}${result.hlsUrl}`
+                hls_url: `${result.hlsUrl}`
             });
 
             res.json({
@@ -993,7 +1006,7 @@ router.post('/api/streams/:id/start', requireAuth, async (req, res) => {
                 message: 'Yayın başlatıldı',
                 data: {
                     stream_name: stream.stream_name,
-                    hls_url: `http://localhost:${process.env.PORT || 3000}${result.hlsUrl}`,
+                    hls_url: `${result.hlsUrl}`,
                     status: 'streaming',
                     pid: result.pid
                 }
@@ -1201,7 +1214,7 @@ router.put('/api/streams/:id', upload.none(), requireAuth, async (req, res) => {
             audio_bitrate: audio_bitrate || '160k',
             is_active: is_active === 'on' || is_active === true || is_active === '1' || is_active === 'true',
             is_recording: is_recording === 'on' || is_recording === true || is_recording === '1' || is_recording === 'true',
-            hls_url: `http://localhost:8080/${stream_name.trim()}.m3u8`
+            hls_url: `${SERVER_HOST}/static/${stream_name.trim()}.m3u8`
         };
 
         // DÜZELTME: Şifre sadece dolu gelirse güncelle

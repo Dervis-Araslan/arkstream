@@ -1,0 +1,1386 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ArkStream - Bağcılar Yayın Sistemi</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Header */
+        .header {
+            background: rgba(255, 255, 255, 0.98);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            padding: 20px 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .logo i {
+            font-size: 2.5rem;
+            color: #2c3e50;
+        }
+
+        .logo h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #2c3e50;
+        }
+
+        .header-controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(45deg, #34495e, #2c3e50);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(52, 73, 94, 0.3);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.9);
+            color: #34495e;
+            border: 2px solid #34495e;
+        }
+
+        .btn-secondary:hover {
+            background: #34495e;
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        /* Status Bar */
+        .status-bar {
+            background: rgba(255, 255, 255, 0.98);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }
+
+        .status-item {
+            text-align: center;
+            padding: 15px;
+            border-radius: 8px;
+            background: linear-gradient(45deg, #f8f9fa, #e9ecef);
+            border: 1px solid #dee2e6;
+        }
+
+        .status-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+
+        .status-label {
+            color: #666;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        /* Loading State */
+        .loading-state {
+            text-align: center;
+            padding: 50px 20px;
+            color: #666;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #2c3e50;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        /* Camera Grid */
+        .camera-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+
+        .camera-card {
+            background: rgba(255, 255, 255, 0.98);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: all 0.4s ease;
+            position: relative;
+        }
+
+        .camera-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+        }
+
+        .camera-preview {
+            width: 100%;
+            height: 200px;
+            background: linear-gradient(45deg, #232526, #414345);
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .camera-preview video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .camera-preview .placeholder {
+            color: #888;
+            font-size: 3rem;
+            opacity: 0.5;
+        }
+
+        .video-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            cursor: pointer;
+        }
+
+        .camera-preview:hover .video-overlay {
+            opacity: 1;
+        }
+
+        .play-button {
+            background: rgba(255, 255, 255, 0.9);
+            border: none;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            font-size: 1.5rem;
+            color: #333;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+
+        .play-button:hover {
+            transform: scale(1.1);
+            background: white;
+        }
+
+        .stream-status {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-live {
+            background: #4CAF50;
+            color: white;
+            animation: pulse 2s infinite;
+        }
+
+        .status-offline {
+            background: #f44336;
+            color: white;
+        }
+
+        .status-connecting {
+            background: #ff9800;
+            color: white;
+        }
+
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.7;
+            }
+
+            100% {
+                opacity: 1;
+            }
+        }
+
+        .camera-info {
+            padding: 20px;
+        }
+
+        .camera-name {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .camera-details {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+        }
+
+        .camera-location {
+            color: #666;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .viewer-count {
+            color: #34495e;
+            font-weight: 600;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .camera-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn-small {
+            padding: 8px 16px;
+            font-size: 0.8rem;
+            border-radius: 8px;
+            flex: 1;
+        }
+
+        .btn-play {
+            background: #4CAF50;
+            color: white;
+            border: none;
+        }
+
+        .btn-play:hover {
+            background: #45a049;
+            transform: translateY(-1px);
+        }
+
+        .btn-play.playing {
+            background: #f44336;
+        }
+
+        .btn-play.playing:hover {
+            background: #d32f2f;
+        }
+
+        .btn-fullscreen {
+            background: #2196F3;
+            color: white;
+            border: none;
+        }
+
+        .btn-fullscreen:hover {
+            background: #1976D2;
+            transform: translateY(-1px);
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 1000;
+            backdrop-filter: blur(5px);
+        }
+
+        .modal-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 90%;
+            max-width: 1200px;
+            background: #000;
+            border-radius: 15px;
+            overflow: hidden;
+        }
+
+        .modal-header {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: white;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 5px;
+            border-radius: 5px;
+            transition: background 0.3s;
+        }
+
+        .modal-close:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .modal-video {
+            width: 100%;
+            height: 60vh;
+            background: #000;
+        }
+
+        /* Loading Animation */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #34495e;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Error State */
+        .error-state {
+            text-align: center;
+            padding: 50px 20px;
+            color: #f44336;
+            background: rgba(244, 67, 54, 0.1);
+            border-radius: 12px;
+            margin: 20px 0;
+        }
+
+        .error-state i {
+            font-size: 3rem;
+            margin-bottom: 20px;
+            opacity: 0.7;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container {
+                padding: 15px;
+            }
+
+            .header {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+
+            .camera-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .status-bar {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <i class="fas fa-video"></i>
+                <h1>ArkStream</h1>
+            </div>
+            <div class="header-controls">
+                <button class="btn btn-secondary" onclick="refreshStreams()">
+                    <i class="fas fa-sync-alt"></i>
+                    Yenile
+                </button>
+            </div>
+        </header>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-item">
+                <div class="status-value" id="totalCameras">-</div>
+                <div class="status-label">Toplam Kamera</div>
+            </div>
+            <div class="status-item">
+                <div class="status-value" id="activeCameras">-</div>
+                <div class="status-label">Aktif Yayın</div>
+            </div>
+            <div class="status-item">
+                <div class="status-value" id="totalViewers">-</div>
+                <div class="status-label">Toplam İzleyici</div>
+            </div>
+            <div class="status-item">
+                <div class="status-value" id="systemStatus">-</div>
+                <div class="status-label">Sistem Performansı</div>
+            </div>
+        </div>
+
+        <!-- Loading State -->
+        <div class="loading-state" id="loadingState">
+            <div class="loading-spinner"></div>
+            <h3>Canlı yayınlar yükleniyor...</h3>
+            <p>Lütfen bekleyin, kamera listesi hazırlanıyor.</p>
+        </div>
+
+        <!-- Error State -->
+        <div class="error-state" id="errorState" style="display: none;">
+            <i class="fas fa-exclamation-triangle"></i>
+            <h3>Yayınlar yüklenemedi</h3>
+            <p>Bağlantı sorunu yaşanıyor. Lütfen sayfayı yenileyin.</p>
+            <button class="btn btn-primary" onclick="refreshStreams()" style="margin-top: 15px;">
+                <i class="fas fa-sync-alt"></i>
+                Tekrar Dene
+            </button>
+        </div>
+
+        <!-- Camera Grid -->
+        <div class="camera-grid" id="cameraGrid">
+            <!-- Cameras will be loaded here -->
+        </div>
+    </div>
+
+    <!-- Full Screen Modal -->
+    <div class="modal" id="videoModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalCameraName">Kamera Adı</h3>
+                <button class="modal-close" onclick="closeModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <video class="modal-video" id="modalVideo" controls autoplay muted></video>
+        </div>
+    </div>
+
+    <script>
+        let cameras = [];
+        let viewerCounts = {};
+        let currentHls = null;
+        let activeVideos = {}; // Video durumlarını takip et
+        let maxConcurrentStreams = 3; // Maksimum eş zamanlı stream sayısı
+        let streamQueue = []; // Bekleme kuyruğu
+
+        // Eş zamanlı stream sayısını kontrol et
+        function canStartNewStream() {
+            const activeStreamCount = Object.values(activeVideos).filter(stream => stream !== null).length;
+            console.log('Active stream count:', activeStreamCount, 'Max allowed:', maxConcurrentStreams);
+            return activeStreamCount < maxConcurrentStreams;
+        }
+
+        // Stream başlatmadan önce eski stream'leri kontrol et
+        function cleanupOldStreams() {
+            const activeStreams = Object.keys(activeVideos).filter(key => activeVideos[key] !== null);
+
+            if (activeStreams.length >= maxConcurrentStreams) {
+                // En eski stream'i durdur
+                const oldestStream = activeStreams[0]; // İlk stream'i al
+                const cameraId = oldestStream.replace('small_', '');
+                console.log('Stopping oldest stream:', cameraId);
+
+                stopVideo(cameraId);
+                resetVideoUI(cameraId);
+            }
+        }
+
+        // toggleVideo fonksiyonunu güncelleyin:
+        function toggleVideo(cameraId) {
+            console.log('toggleVideo called for camera:', cameraId);
+
+            const camera = cameras.find(cam => cam.id === cameraId);
+            console.log('Found camera:', camera);
+
+            if (!camera || camera.status !== 'live') {
+                console.log('Camera not found or not live:', camera);
+                alert('Bu kamera şu anda canlı yayında değil.');
+                return;
+            }
+
+            const streamKey = `small_${cameraId}`;
+            const isPlaying = activeVideos[streamKey];
+            console.log('Stream key:', streamKey, 'Is playing:', isPlaying);
+
+            if (isPlaying) {
+                // Video durduruluyor
+                console.log('Stopping video...');
+                stopVideoAndUpdateUI(cameraId);
+            } else {
+                // Yeni video başlatmaya çalışıyoruz
+                if (!canStartNewStream()) {
+                    const userConfirm = confirm(
+                        'Maksimum eş zamanlı yayın sayısına ulaştınız. ' +
+                        'Yeni yayını başlatmak için en eski yayın durdurulacak. Devam etmek istiyor musunuz?'
+                    );
+
+                    if (!userConfirm) {
+                        return;
+                    }
+
+                    cleanupOldStreams();
+                }
+
+                console.log('Starting video...');
+                startVideoAndUpdateUI(cameraId, camera);
+            }
+        }
+
+        function stopVideoAndUpdateUI(cameraId) {
+            const video = document.getElementById(`video-${cameraId}`);
+            const placeholder = document.getElementById(`placeholder-${cameraId}`);
+            const overlay = document.getElementById(`overlay-${cameraId}`);
+            const playIcon = document.getElementById(`play-icon-${cameraId}`);
+            const btnIcon = document.getElementById(`btn-icon-${cameraId}`);
+            const btnText = document.getElementById(`btn-text-${cameraId}`);
+            const playBtn = document.getElementById(`play-btn-${cameraId}`);
+
+            // Video'yu durdur
+            stopVideo(cameraId);
+
+            // UI güncellemeleri
+            if (video) video.style.display = 'none';
+            if (placeholder) placeholder.style.display = 'flex';
+            if (overlay) overlay.style.opacity = '0';
+            if (playIcon) playIcon.className = 'fas fa-play';
+            if (btnIcon) btnIcon.className = 'fas fa-play';
+            if (btnText) btnText.textContent = 'Oynat';
+            if (playBtn) playBtn.classList.remove('playing');
+
+            const streamKey = `small_${cameraId}`;
+            activeVideos[streamKey] = null;
+        }
+
+        function startVideoAndUpdateUI(cameraId, camera) {
+            const video = document.getElementById(`video-${cameraId}`);
+            const placeholder = document.getElementById(`placeholder-${cameraId}`);
+            const playIcon = document.getElementById(`play-icon-${cameraId}`);
+            const btnIcon = document.getElementById(`btn-icon-${cameraId}`);
+            const btnText = document.getElementById(`btn-text-${cameraId}`);
+            const playBtn = document.getElementById(`play-btn-${cameraId}`);
+
+            // Loading state'i göster
+            if (btnText) btnText.textContent = 'Yükleniyor...';
+            if (btnIcon) btnIcon.className = 'fas fa-spinner fa-spin';
+            if (playBtn) playBtn.disabled = true;
+
+            // Video oynat
+            playSmallVideo(camera, cameraId);
+
+            // Başarı durumunda UI güncelle (playSmallVideo içinde yapılacak)
+            setTimeout(() => {
+                if (placeholder) placeholder.style.display = 'none';
+                if (video) video.style.display = 'block';
+                if (playIcon) playIcon.className = 'fas fa-pause';
+                if (btnIcon) btnIcon.className = 'fas fa-pause';
+                if (btnText) btnText.textContent = 'Durdur';
+                if (playBtn) {
+                    playBtn.classList.add('playing');
+                    playBtn.disabled = false;
+                }
+
+                incrementViewer(cameraId);
+            }, 2000); // 2 saniye sonra UI'yi güncelle
+        }
+
+        // URL kontrol fonksiyonu ekleyin:
+        function validateStreamUrl(url) {
+            try {
+                const urlObj = new URL(url);
+                return urlObj.protocol === 'http:' || urlObj.protocol === 'https:';
+            } catch (e) {
+                return false;
+            }
+        }
+
+        // Stream sağlık kontrolü
+        function checkStreamHealth(cameraId) {
+            const video = document.getElementById(`video-${cameraId}`);
+            if (!video) return false;
+
+            // Video donmuş mu kontrol et
+            const currentTime = video.currentTime;
+            setTimeout(() => {
+                if (video.currentTime === currentTime && !video.paused && !video.ended) {
+                    console.warn('Stream seems frozen for camera:', cameraId);
+                    // Stream donmuş, yeniden başlat
+                    const camera = cameras.find(cam => cam.id === cameraId);
+                    if (camera) {
+                        console.log('Restarting frozen stream for:', cameraId);
+                        stopVideoAndUpdateUI(cameraId);
+                        setTimeout(() => startVideoAndUpdateUI(cameraId, camera), 1000);
+                    }
+                }
+            }, 5000); // 5 saniye sonra kontrol et
+        }
+
+        // Periyodik sağlık kontrolü
+        setInterval(() => {
+            Object.keys(activeVideos).forEach(streamKey => {
+                if (activeVideos[streamKey] !== null) {
+                    const cameraId = streamKey.replace('small_', '');
+                    checkStreamHealth(cameraId);
+                }
+            });
+        }, 30000); // Her 30 saniyede bir kontrol et
+
+        // Sayfa kapatılmadan önce temizlik
+        window.addEventListener('beforeunload', function () {
+            console.log('Page unloading, cleaning up streams...');
+            Object.keys(activeVideos).forEach(streamKey => {
+                if (streamKey.includes('small_')) {
+                    const cameraId = streamKey.replace('small_', '');
+                    stopVideo(cameraId);
+                }
+            });
+
+            if (currentHls) {
+                currentHls.destroy();
+            }
+        });
+
+        // Hızlı tıklama engelleyici
+        let lastClickTime = 0;
+        const clickThreshold = 1000; // 1 saniye
+
+        function isRapidClick() {
+            const currentTime = Date.now();
+            if (currentTime - lastClickTime < clickThreshold) {
+                console.log('Rapid click detected, ignoring...');
+                return true;
+            }
+            lastClickTime = currentTime;
+            return false;
+        }
+
+        // toggleVideo çağrısından önce hızlı tıklama kontrolü yapın
+        const originalToggleVideo = toggleVideo;
+        toggleVideo = function (cameraId) {
+            if (isRapidClick()) {
+                return;
+            }
+            return originalToggleVideo(cameraId);
+        };
+
+        // API'den yayınları yükle
+        async function fetchStreams() {
+            try {
+                showLoadingState();
+
+                const response = await fetch('/api/streams/public');
+                const result = await response.json();
+
+                console.log('API Response:', result); // Debug log
+
+                if (result.success) {
+                    cameras = result.data;
+                    console.log('Loaded cameras:', cameras); // Debug log
+
+                    hideLoadingState();
+                    loadCameras();
+                    updateStats();
+                } else {
+                    console.error('Stream loading failed:', result.message);
+                    showErrorState();
+                }
+            } catch (error) {
+                console.error('Fetch error:', error);
+                showErrorState();
+            }
+        }
+
+        function showLoadingState() {
+            document.getElementById('loadingState').style.display = 'block';
+            document.getElementById('errorState').style.display = 'none';
+            document.getElementById('cameraGrid').style.display = 'none';
+        }
+
+        function hideLoadingState() {
+            document.getElementById('loadingState').style.display = 'none';
+            document.getElementById('errorState').style.display = 'none';
+            document.getElementById('cameraGrid').style.display = 'grid';
+        }
+
+        function showErrorState() {
+            document.getElementById('loadingState').style.display = 'none';
+            document.getElementById('errorState').style.display = 'block';
+            document.getElementById('cameraGrid').style.display = 'none';
+        }
+
+        function loadCameras() {
+            const grid = document.getElementById('cameraGrid');
+            grid.innerHTML = '';
+
+            if (cameras.length === 0) {
+                grid.innerHTML = `
+                    <div class="error-state" style="grid-column: 1 / -1;">
+                        <i class="fas fa-video-slash"></i>
+                        <h3>Aktif yayın bulunamadı</h3>
+                        <p>Şu anda canlı yayın yapan kamera bulunmuyor.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            cameras.forEach(camera => {
+                const cameraCard = createCameraCard(camera);
+                grid.appendChild(cameraCard);
+            });
+        }
+
+        function createCameraCard(camera) {
+            const card = document.createElement('div');
+            card.className = 'camera-card';
+            card.setAttribute('data-camera-id', camera.id);
+
+            const statusClass = {
+                'live': 'status-live',
+                'offline': 'status-offline',
+                'connecting': 'status-connecting'
+            }[camera.status];
+
+            const statusText = {
+                'live': 'CANLI',
+                'offline': 'ÇEVRIMDİŞİ',
+                'connecting': 'BAĞLANIYOR'
+            }[camera.status];
+
+            const viewerCount = viewerCounts[camera.id] || camera.viewers || 0;
+
+            card.innerHTML = `
+                <div class="camera-preview">
+                    <video id="video-${camera.id}" muted loop controls style="display: none;"></video>
+                    <div class="placeholder" id="placeholder-${camera.id}">
+                        <i class="fas fa-video"></i>
+                    </div>
+                    <div class="video-overlay" id="overlay-${camera.id}" onclick="toggleVideo('${camera.id}')">
+                        <button class="play-button" onclick="event.stopPropagation(); toggleVideo('${camera.id}')">
+                            <i class="fas fa-play" id="play-icon-${camera.id}"></i>
+                        </button>
+                    </div>
+                    <div class="stream-status ${statusClass}">${statusText}</div>
+                </div>
+                <div class="camera-info">
+                    <div class="camera-name">${camera.name}</div>
+                    <div class="camera-details">
+                        <div class="camera-location">
+                            <i class="fas fa-map-marker-alt"></i>
+                            ${camera.location}
+                            ${camera.brand ? ` - ${camera.brand}` : ''}
+                            ${camera.model ? ` ${camera.model}` : ''}
+                        </div>
+                        <div class="viewer-count">
+                            <i class="fas fa-eye"></i>
+                            ${viewerCount} izleyici
+                        </div>
+                    </div>
+                    ${camera.resolution ? `<div style="font-size: 0.8rem; color: #666; margin-bottom: 10px;">Çözünürlük: ${camera.resolution}</div>` : ''}
+                    <div class="camera-actions">
+                        <button class="btn btn-small btn-play" id="play-btn-${camera.id}" onclick="toggleVideo('${camera.id}')">
+                            <i class="fas fa-play" id="btn-icon-${camera.id}"></i>
+                            <span id="btn-text-${camera.id}">Oynat</span>
+                        </button>
+                        <button class="btn btn-small btn-fullscreen" onclick="openFullscreen(${JSON.stringify(camera).replace(/"/g, '&quot;')})">
+                            <i class="fas fa-expand"></i>
+                            Tam Ekran
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            return card;
+        }
+
+        // Küçük playerde video oynat/durdur
+        function toggleVideo(cameraId) {
+            console.log('toggleVideo called for camera:', cameraId);
+
+            const camera = cameras.find(cam => cam.id === cameraId);
+            console.log('Found camera:', camera);
+
+            if (!camera || camera.status !== 'live') {
+                console.log('Camera not found or not live:', camera);
+                alert('Bu kamera şu anda canlı yayında değil.');
+                return;
+            }
+
+            const video = document.getElementById(`video-${cameraId}`);
+            const placeholder = document.getElementById(`placeholder-${cameraId}`);
+            const overlay = document.getElementById(`overlay-${cameraId}`);
+            const playIcon = document.getElementById(`play-icon-${cameraId}`);
+            const btnIcon = document.getElementById(`btn-icon-${cameraId}`);
+            const btnText = document.getElementById(`btn-text-${cameraId}`);
+            const playBtn = document.getElementById(`play-btn-${cameraId}`);
+
+            console.log('Video element:', video);
+            console.log('Stream URL:', camera.streamUrl);
+
+            const streamKey = `small_${cameraId}`;
+            const isPlaying = activeVideos[streamKey];
+            console.log('Stream key:', streamKey, 'Is playing:', isPlaying);
+
+            if (isPlaying) {
+                console.log('Stopping video...');
+                // Video durduruluyor
+                stopVideo(cameraId);
+
+                // UI güncellemeleri
+                video.style.display = 'none';
+                placeholder.style.display = 'flex';
+                overlay.style.opacity = '0';
+                playIcon.className = 'fas fa-play';
+                btnIcon.className = 'fas fa-play';
+                btnText.textContent = 'Oynat';
+                playBtn.classList.remove('playing');
+
+                activeVideos[streamKey] = null;
+            } else {
+                console.log('Starting video...');
+                // Video oynatılıyor
+                playSmallVideo(camera, cameraId);
+
+                // UI güncellemeleri
+                placeholder.style.display = 'none';
+                video.style.display = 'block';
+                playIcon.className = 'fas fa-pause';
+                btnIcon.className = 'fas fa-pause';
+                btnText.textContent = 'Durdur';
+                playBtn.classList.add('playing');
+
+                incrementViewer(cameraId);
+            }
+        }
+
+        function playSmallVideo(camera, cameraId) {
+            console.log('playSmallVideo called for:', camera.name, 'URL:', camera.streamUrl);
+
+            const video = document.getElementById(`video-${cameraId}`);
+            const streamKey = `small_${cameraId}`;
+
+            if (!video) {
+                console.error('Video element not found for camera:', cameraId);
+                return;
+            }
+
+            // Stream URL'ini kontrol et
+            let streamUrl = camera.streamUrl;
+            console.log('Original stream URL:', streamUrl);
+
+            // Eğer relative path ise full path yap
+            if (streamUrl.startsWith('/')) {
+                streamUrl = window.location.origin + streamUrl;
+                console.log('Updated stream URL:', streamUrl);
+            }
+
+            if (Hls.isSupported()) {
+                console.log('HLS.js supported, creating HLS instance...');
+
+                // Mevcut HLS instance'ı temizle
+                if (activeVideos[streamKey]) {
+                    console.log('Destroying existing HLS instance');
+                    try {
+                        activeVideos[streamKey].destroy();
+                    } catch (e) {
+                        console.warn('Error destroying HLS instance:', e);
+                    }
+                    activeVideos[streamKey] = null;
+                }
+
+                // Video element'i temizle
+                video.src = '';
+                video.load();
+
+                const hls = new Hls({
+                    debug: false,
+                    enableWorker: true,
+
+                    // Daha agresif buffer yönetimi
+                    maxBufferLength: 10,        // 10 saniye buffer
+                    maxMaxBufferLength: 20,     // Max 20 saniye
+                    liveSyncDuration: 1,        // 1 saniye sync
+                    liveMaxLatencyDuration: 5,  // Max 5 saniye gecikme
+
+                    // Fragment loading optimizasyonları
+                    fragLoadingTimeOut: 10000,
+                    fragLoadingMaxRetry: 2,
+                    manifestLoadingTimeOut: 8000,
+                    manifestLoadingMaxRetry: 2,
+
+                    // Hata recovery ayarları
+                    maxBufferHole: 0.3,
+                    nudgeOffset: 0.1,
+                    nudgeMaxRetry: 2,
+
+                    // Bandwidth tahminleri
+                    abrEwmaDefaultEstimate: 500000,
+                    abrBandWidthFactor: 0.8,
+                    abrBandWidthUpFactor: 0.6,
+
+                    // Backoff stratejisi
+                    levelLoadingTimeOut: 8000,
+                    levelLoadingMaxRetry: 2,
+
+                    // Düşük gecikme modu kapalı (sorun yaratabilir)
+                    lowLatencyMode: false
+                });
+
+                // Hata sayacı ekle
+                hls.errorCount = 0;
+                hls.maxErrors = 3;
+
+                hls.loadSource(streamUrl);
+                hls.attachMedia(video);
+
+                hls.on(Hls.Events.MANIFEST_PARSED, function () {
+                    console.log('HLS manifest parsed successfully for', cameraId);
+
+                    // Video element ayarları
+                    video.muted = true;
+                    video.playsInline = true;
+
+                    // Autoplay dene
+                    const playPromise = video.play();
+
+                    if (playPromise !== undefined) {
+                        playPromise.then(() => {
+                            console.log('Video started playing for', cameraId);
+                            activeVideos[streamKey] = hls;
+                            hls.errorCount = 0; // Reset error count on success
+                        }).catch(e => {
+                            console.error('Video play failed for', cameraId, ':', e);
+                            handlePlayError(e, cameraId, hls);
+                        });
+                    } else {
+                        // Eski tarayıcılar için
+                        activeVideos[streamKey] = hls;
+                    }
+                });
+
+                hls.on(Hls.Events.ERROR, function (event, data) {
+                    console.error('HLS Error for', cameraId, ':', event, data);
+
+                    // Hata sayısını artır
+                    hls.errorCount = (hls.errorCount || 0) + 1;
+
+                    // Non-fatal hatalar için retry mantığı
+                    if (!data.fatal) {
+                        console.warn(`Non-fatal HLS error for ${cameraId}, continuing... (Error count: ${hls.errorCount})`);
+
+                        // Çok fazla non-fatal hata varsa stream'i durdur
+                        if (hls.errorCount > hls.maxErrors) {
+                            console.error(`Too many errors for ${cameraId}, stopping stream`);
+                            stopVideo(cameraId);
+                            resetVideoUI(cameraId);
+                            alert('Video yayınında çok fazla hata oluştu. Lütfen tekrar deneyin.');
+                        }
+                        return;
+                    }
+
+                    // Fatal hata türlerine göre farklı aksiyonlar
+                    handleFatalHLSError(data, cameraId, hls);
+                });
+
+                // Diğer event'ler
+                hls.on(Hls.Events.MEDIA_ATTACHED, function () {
+                    console.log('HLS media attached for', cameraId);
+                });
+
+                hls.on(Hls.Events.BUFFER_STALLED, function () {
+                    console.warn('Buffer stalled for', cameraId);
+                });
+
+                hls.on(Hls.Events.BUFFER_RESET, function () {
+                    console.log('Buffer reset for', cameraId);
+                });
+
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                console.log('Native HLS support detected for', cameraId);
+
+                // Native HLS için basit ayar
+                video.src = streamUrl;
+                video.muted = true;
+                video.playsInline = true;
+
+                video.play().then(() => {
+                    console.log('Native HLS video started playing for', cameraId);
+                    activeVideos[streamKey] = true;
+                }).catch(e => {
+                    console.error('Native HLS play failed for', cameraId, ':', e);
+                    alert('Video oynatılamadı: ' + e.message);
+                    resetVideoUI(cameraId);
+                });
+            } else {
+                console.error('HLS not supported in this browser');
+                alert('Tarayıcınız bu video formatını desteklemiyor.');
+                resetVideoUI(cameraId);
+                return;
+            }
+        }
+
+        function resetVideoUI(cameraId) {
+            const video = document.getElementById(`video-${cameraId}`);
+            const placeholder = document.getElementById(`placeholder-${cameraId}`);
+            const playIcon = document.getElementById(`play-icon-${cameraId}`);
+            const btnIcon = document.getElementById(`btn-icon-${cameraId}`);
+            const btnText = document.getElementById(`btn-text-${cameraId}`);
+            const playBtn = document.getElementById(`play-btn-${cameraId}`);
+
+            if (video) video.style.display = 'none';
+            if (placeholder) placeholder.style.display = 'flex';
+            if (playIcon) playIcon.className = 'fas fa-play';
+            if (btnIcon) btnIcon.className = 'fas fa-play';
+            if (btnText) btnText.textContent = 'Oynat';
+            if (playBtn) playBtn.classList.remove('playing');
+        }
+
+        function stopVideo(cameraId) {
+            const video = document.getElementById(`video-${cameraId}`);
+            const streamKey = `small_${cameraId}`;
+
+            console.log('Stopping video for camera:', cameraId);
+
+            if (activeVideos[streamKey]) {
+                if (typeof activeVideos[streamKey] === 'object' && activeVideos[streamKey].destroy) {
+                    console.log('Destroying HLS instance for', cameraId);
+                    try {
+                        activeVideos[streamKey].destroy();
+                    } catch (e) {
+                        console.warn('Error destroying HLS for', cameraId, ':', e);
+                    }
+                }
+                activeVideos[streamKey] = null;
+            }
+
+            if (video) {
+                video.pause();
+                video.src = '';
+                video.load(); // Video element'i temizle
+            }
+        }
+
+        // Tam ekran modal
+        function openFullscreen(camera) {
+            if (camera.status !== 'live') {
+                alert('Bu kamera şu anda canlı yayında değil.');
+                return;
+            }
+
+            const modal = document.getElementById('videoModal');
+            const modalVideo = document.getElementById('modalVideo');
+            const modalName = document.getElementById('modalCameraName');
+
+            modalName.textContent = camera.name;
+
+            // HLS.js ile video yükle
+            if (Hls.isSupported()) {
+                if (currentHls) {
+                    currentHls.destroy();
+                }
+
+                currentHls = new Hls({
+                    debug: false,
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                    liveSyncDuration: 2,
+                    liveMaxLatencyDuration: 8,
+                    maxBufferLength: 10
+                });
+
+                currentHls.loadSource(camera.streamUrl);
+                currentHls.attachMedia(modalVideo);
+
+                currentHls.on(Hls.Events.MANIFEST_PARSED, function () {
+                    modalVideo.play().catch(e => {
+                        console.log('Autoplay failed:', e);
+                    });
+                    incrementViewer(camera.id);
+                });
+
+                currentHls.on(Hls.Events.ERROR, function (event, data) {
+                    console.error('HLS Error:', data);
+                    if (data.fatal) {
+                        alert('Video yüklenirken hata oluştu.');
+                        closeModal();
+                    }
+                });
+
+            } else if (modalVideo.canPlayType('application/vnd.apple.mpegurl')) {
+                modalVideo.src = camera.streamUrl;
+                modalVideo.play().catch(e => {
+                    console.log('Autoplay failed:', e);
+                });
+                incrementViewer(camera.id);
+            } else {
+                alert('Tarayıcınız bu video formatını desteklemiyor.');
+                return;
+            }
+
+            modal.style.display = 'block';
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('videoModal');
+            const modalVideo = document.getElementById('modalVideo');
+
+            modal.style.display = 'none';
+            modalVideo.pause();
+
+            if (currentHls) {
+                currentHls.destroy();
+                currentHls = null;
+            }
+
+            modalVideo.src = '';
+            document.body.style.overflow = 'auto';
+        }
+
+        // Viewer sayısını artır
+        function incrementViewer(cameraId) {
+            if (!viewerCounts[cameraId]) {
+                viewerCounts[cameraId] = 0;
+            }
+            viewerCounts[cameraId]++;
+
+            const camera = cameras.find(cam => cam.id === cameraId);
+            if (camera) {
+                camera.viewers = viewerCounts[cameraId];
+            }
+
+            updateCameraViewerCount(cameraId);
+            updateStats();
+        }
+
+        // Belirli kameranın viewer sayısını güncelle
+        function updateCameraViewerCount(cameraId) {
+            const card = document.querySelector(`[data-camera-id="${cameraId}"]`);
+            if (card) {
+                const viewerElement = card.querySelector('.viewer-count');
+                const count = viewerCounts[cameraId] || 0;
+                if (viewerElement) {
+                    viewerElement.innerHTML = `<i class="fas fa-eye"></i> ${count} izleyici`;
+                }
+            }
+        }
+
+        function refreshStreams() {
+            const refreshBtn = document.querySelector('.btn-secondary');
+            const originalContent = refreshBtn.innerHTML;
+            refreshBtn.innerHTML = '<span class="loading"></span> Yenileniyor...';
+            refreshBtn.disabled = true;
+
+            // Aktif videoları durdur
+            Object.keys(activeVideos).forEach(key => {
+                if (key.includes('small_')) {
+                    const cameraId = key.replace('small_', '');
+                    stopVideo(cameraId);
+                }
+            });
+
+            setTimeout(() => {
+                fetchStreams().finally(() => {
+                    refreshBtn.innerHTML = originalContent;
+                    refreshBtn.disabled = false;
+                });
+            }, 1000);
+        }
+
+        function updateStats() {
+            const liveCameras = cameras.filter(cam => cam.status === 'live').length;
+            const totalViewers = Object.values(viewerCounts).reduce((sum, count) => sum + count, 0);
+
+            document.getElementById('totalCameras').textContent = cameras.length;
+            document.getElementById('activeCameras').textContent = liveCameras;
+            document.getElementById('totalViewers').textContent = totalViewers;
+
+            // Sistem performansı simülasyonu
+            const performance = Math.floor(Math.random() * 20 + 80);
+            document.getElementById('systemStatus').textContent = `${performance}%`;
+        }
+
+        // Sayfa yüklendiğinde
+        document.addEventListener('DOMContentLoaded', function () {
+            fetchStreams();
+            // 30 saniyede bir güncelle
+            setInterval(fetchStreams, 30000);
+        });
+
+        // Sayfa kapanırken videoları temizle
+        window.addEventListener('beforeunload', function () {
+            Object.keys(activeVideos).forEach(key => {
+                if (key.includes('small_')) {
+                    const cameraId = key.replace('small_', '');
+                    stopVideo(cameraId);
+                }
+            });
+
+            if (currentHls) {
+                currentHls.destroy();
+            }
+        });
+
+        // Escape ile modal kapat
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') {
+                closeModal();
+            }
+        });
+
+        // Modal dışına tıklayınca kapat
+        document.getElementById('videoModal').addEventListener('click', function (e) {
+            if (e.target === this) {
+                closeModal();
+            }
+        });
+        function handlePlayError(error, cameraId, hls) {
+            if (error.name === 'NotAllowedError') {
+                console.log('Autoplay blocked, trying user interaction for', cameraId);
+                // Kullanıcı etkileşimi gerekiyor
+                alert('Video oynatmak için sayfa ile etkileşim gerekiyor. Lütfen tekrar deneyin.');
+                stopVideo(cameraId);
+                resetVideoUI(cameraId);
+            } else if (error.name === 'AbortError') {
+                console.log('Play aborted for', cameraId);
+                // Genellikle kullanıcı hızlı tıklamalar yaptığında olur
+            } else {
+                console.error('Unexpected play error for', cameraId, ':', error);
+                alert('Video oynatılamadı: ' + error.message);
+                stopVideo(cameraId);
+                resetVideoUI(cameraId);
+            }
+        }
+
+        function handleFatalHLSError(data, cameraId, hls) {
+            console.error('Fatal HLS error for', cameraId, ':', data.type, data.details);
+
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                console.error('Network error for', cameraId, ', trying to recover...');
+
+                setTimeout(() => {
+                    if (hls && !hls.destroyed) {
+                        try {
+                            hls.startLoad();
+                        } catch (e) {
+                            console.error('Recovery failed for', cameraId, ':', e);
+                            fallbackError(cameraId);
+                        }
+                    }
+                }, 1000);
+
+            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                console.error('Media error for', cameraId, ', trying to recover...');
+
+                setTimeout(() => {
+                    if (hls && !hls.destroyed) {
+                        try {
+                            hls.recoverMediaError();
+                        } catch (e) {
+                            console.error('Media recovery failed for', cameraId, ':', e);
+                            fallbackError(cameraId);
+                        }
+                    }
+                }, 1000);
+
+            } else {
+                fallbackError(cameraId);
+            }
+        }
+
+        function fallbackError(cameraId) {
+            console.error('All recovery attempts failed for', cameraId);
+            alert('Video yüklenirken hata oluştu. Lütfen sayfayı yenileyin veya daha sonra tekrar deneyin.');
+            stopVideo(cameraId);
+            resetVideoUI(cameraId);
+        }
+    </script>
+</body>
+
+</html>

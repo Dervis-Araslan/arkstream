@@ -20,17 +20,21 @@ class StreamService {
     generateRTSPUrl(brand, username, password, ip, port, channel) {
         brand = brand.toLowerCase();
 
+        // URL encoding sorunlarını önlemek için şifreyi decode edin
+        const decodedPassword = decodeURIComponent(password);
+
         if (brand === 'dahua') {
-            return `rtsp://${username}:${password}@${ip}:${port}/cam/realmonitor?channel=${channel}&subtype=0`;
+            // Port 8080 genellikle web interface, RTSP için 554 deneyin
+            const rtspPort = port === 8080 ? 554 : port;
+            return `rtsp://${username}:${decodedPassword}@${ip}:${rtspPort}/cam/realmonitor?channel=${channel}&subtype=0`;
         } else if (brand === 'samsung') {
-            return `rtsp://${username}:${password}@${ip}:${port}/profile1/media.smp`;
+            return `rtsp://${username}:${decodedPassword}@${ip}:${port}/profile1/media.smp`;
         } else if (brand === 'hikvision') {
-            return `rtsp://${username}:${password}@${ip}:${port}/Streaming/Channels/${channel}01/`;
+            return `rtsp://${username}:${decodedPassword}@${ip}:${port}/Streaming/Channels/${channel}01/`;
         } else if (brand === 'axis') {
-            return `rtsp://${username}:${password}@${ip}:${port}/axis-media/media.amp`;
+            return `rtsp://${username}:${decodedPassword}@${ip}:${port}/axis-media/media.amp`;
         } else {
-            // Generic RTSP URL
-            return `rtsp://${username}:${password}@${ip}:${port}/`;
+            return `rtsp://${username}:${decodedPassword}@${ip}:${port}/`;
         }
     }
 
@@ -142,14 +146,14 @@ class StreamService {
                 status: 'starting',
                 startedAt: new Date(),
                 config: streamConfig,
-                hlsUrl: `/public/${streamName}.m3u8`,
+                hlsUrl: `/static/${streamName}.m3u8`,
                 rtspUrl: rtspUrl
             };
 
             return {
                 success: true,
                 streamName,
-                hlsUrl: `/public/${streamName}.m3u8`,
+                hlsUrl: `/static/${streamName}.m3u8`,
                 pid: ffmpegProcess.pid,
                 status: 'starting'
             };

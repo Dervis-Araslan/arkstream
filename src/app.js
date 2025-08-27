@@ -2,9 +2,10 @@ const express = require('express');
 const path = require('path');
 require('dotenv').config();
 
-// Database connection
-const { sequelize, User } = require('./models');
+// Database connection - Path düzeltmesi
+const { sequelize, User, Stream, Camera } = require('./models');
 const bcrypt = require('bcryptjs');
+const { getStreamService } = require('./services/stream');
 
 // Routes
 const adminRoutes = require('./routers/admin');
@@ -28,17 +29,9 @@ app.set('views', path.join(__dirname, 'views'));
 app.use('/admin', adminRoutes);
 
 // Basic routes
-app.get('/', (req, res) => {
-    res.send(`
-    <h1>🚀 Ark Stream - IP Camera System</h1>
-    <p>Server is running successfully!</p>
-    <ul>
-      <li><a href="/admin">Admin Panel</a></li>
-      <li><a href="/api/health">API Health Check</a></li>
-      <li><a href="/api/stats">System Stats</a></li>
-    </ul>
-  `);
-});
+const publicRoutes = require('./routers/public');
+app.use('/', publicRoutes);
+const SERVER_HOST = process.env.SERVER_HOST + ":" + process.env.PORT || getServerIp() + ":" + + process.env.PORT;
 
 // API routes
 app.get('/api/health', (req, res) => {
@@ -74,6 +67,166 @@ app.get('/api/stats', async (req, res) => {
         });
     }
 });
+
+// Stream Recovery Function
+async function recoverStreams() {
+    try {
+        console.log('🔄 Checking stream states on startup...');
+
+        const streamService = getStreamService();
+
+        // Clean up orphaned HLS files first
+        await cleanupOrphanedFiles();
+
+        // Find streams marked as active in database
+        const activeStreams = await Stream.findAll({
+            where: {
+                status: ['streaming', 'starting'],
+                is_active: true
+            },
+            include: [{
+                model: Camera,
+                as: 'camera',
+                where: { is_active: true }
+            }]
+        });
+
+        console.log(`📊 Found ${activeStreams.length} streams marked as active in database`);
+
+        for (const stream of activeStreams) {
+            const isActuallyActive = streamService.isStreamActive(stream.stream_name);
+
+            if (!isActuallyActive) {
+                console.log(`⚠️ Stream ${stream.stream_name} marked as streaming but not actually running`);
+
+                // Update database status to stopped first
+                await stream.update({
+                    status: 'stopped',
+                    last_stopped: new Date(),
+                    process_id: null,
+                    error_message: 'Application restart - stream was not running'
+                });
+
+                console.log(`✅ Stream ${stream.stream_name} status updated to 'stopped'`);
+
+                // Auto-restart streams
+                try {
+                    console.log(`🔄 Auto-restarting stream ${stream.stream_name}`);
+
+                    const streamConfig = {
+                        streamName: stream.stream_name,
+                        brand: stream.camera.brand,
+                        username: stream.username,
+                        password: stream.password,
+                        ip: stream.ip_address,
+                        port: stream.rtsp_port,
+                        channel: stream.channel,
+                        resolution: stream.resolution,
+                        fps: stream.fps,
+                        bitrate: stream.bitrate,
+                        audioBitrate: stream.audio_bitrate
+                    };
+
+                    const result = await streamService.startStream(streamConfig);
+
+                    // Set up callbacks for database updates
+                    streamService.setStreamCallbacks(stream.stream_name, {
+                        onClose: async (code) => {
+                            await stream.update({
+                                status: code === 0 ? 'stopped' : 'error',
+                                last_stopped: new Date(),
+                                error_message: code !== 0 ? `FFmpeg exited with code ${code}` : null,
+                                process_id: null
+                            });
+                        },
+                        onError: async (error) => {
+                            await stream.update({
+                                status: 'error',
+                                error_message: error.message,
+                                process_id: null
+                            });
+                        }
+                    });
+
+                    await stream.update({
+                        status: 'streaming',
+                        last_started: new Date(),
+                        process_id: result.pid,
+                        error_message: null,
+                        hls_url: `${SERVER_HOST}/static/${stream.stream_name}.m3u8`
+                    });
+
+                    console.log(`✅ Stream ${stream.stream_name} auto-restarted successfully (PID: ${result.pid})`);
+                } catch (restartError) {
+                    console.error(`❌ Failed to auto-restart stream ${stream.stream_name}:`, restartError.message);
+
+                    await stream.update({
+                        status: 'error',
+                        error_message: `Auto-restart failed: ${restartError.message}`
+                    });
+                }
+            } else {
+                console.log(`✅ Stream ${stream.stream_name} is actually running - keeping status`);
+            }
+        }
+
+        console.log('✅ Stream recovery completed');
+
+    } catch (error) {
+        console.error('❌ Stream recovery failed:', error);
+    }
+}
+
+// Clean up orphaned HLS files
+async function cleanupOrphanedFiles() {
+    try {
+        const fs = require('fs');
+        const glob = require('glob');
+        const publicPath = path.join(__dirname, '../public');
+
+        // Find all .m3u8 and .ts files
+        const m3u8Files = glob.sync(path.join(publicPath, '*.m3u8'));
+        const tsFiles = glob.sync(path.join(publicPath, '*.ts'));
+
+        const allFiles = [...m3u8Files, ...tsFiles];
+
+        if (allFiles.length > 0) {
+            console.log(`🧹 Cleaning up ${allFiles.length} orphaned HLS files...`);
+
+            allFiles.forEach(file => {
+                if (fs.existsSync(file)) {
+                    fs.unlinkSync(file);
+                    console.log(`🗑️ Deleted: ${path.basename(file)}`);
+                }
+            });
+        }
+
+    } catch (error) {
+        console.error('❌ Error during HLS cleanup:', error);
+    }
+}
+
+// Graceful shutdown handler
+async function gracefulShutdown() {
+    console.log('\n🔄 Shutting down server...');
+
+    try {
+        const streamService = getStreamService();
+        await streamService.stopAllStreams();
+        console.log('✅ All streams stopped');
+    } catch (error) {
+        console.error('❌ Error stopping streams:', error);
+    }
+
+    try {
+        await sequelize.close();
+        console.log('✅ Database connection closed');
+    } catch (error) {
+        console.error('❌ Error closing database:', error);
+    }
+
+    process.exit(0);
+}
 
 // Create first admin user
 async function createDefaultAdmin() {
@@ -133,11 +286,14 @@ async function startServer() {
         await createDefaultAdmin();
 
         app.listen(PORT, () => {
-            console.log(`\n🚀 Ark Stream Server running on http://localhost:${PORT}`);
-            console.log(`📊 Admin Panel: http://localhost:${PORT}/admin`);
-            console.log(`🎥 Main Dashboard: http://localhost:${PORT}`);
-            console.log(`📡 API Health: http://localhost:${PORT}/api/health`);
-            console.log(`📈 API Stats: http://localhost:${PORT}/api/stats\n`);
+            console.log(`\n🚀 Ark Stream Server running on http://${SERVER_HOST}`);
+            console.log(`📊 Admin Panel: http://${SERVER_HOST}/admin`);
+            console.log(`🎥 Main Dashboard: http://${SERVER_HOST}`);
+            console.log(`📡 API Health: http://${SERVER_HOST}/api/health`);
+            console.log(`📈 API Stats: http://${SERVER_HOST}/api/stats\n`);
+
+            // Run stream recovery after 3 seconds (ensure database is ready)
+            setTimeout(recoverStreams, 3000);
         });
 
     } catch (error) {
@@ -149,11 +305,7 @@ async function startServer() {
 }
 
 // Handle graceful shutdown
-process.on('SIGINT', async () => {
-    console.log('\n🔄 Shutting down server...');
-    await sequelize.close();
-    console.log('✅ Database connection closed');
-    process.exit(0);
-});
+process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', gracefulShutdown);
 
 startServer();
