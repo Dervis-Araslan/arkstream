@@ -265,6 +265,19 @@
             color: white;
         }
 
+        /* Delay info badge */
+        .delay-info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
         @keyframes pulse {
             0% {
                 opacity: 1;
@@ -548,207 +561,7 @@
         let viewerCounts = {};
         let currentHls = null;
         let activeVideos = {}; // Video durumlarını takip et
-        let maxConcurrentStreams = 3; // Maksimum eş zamanlı stream sayısı
-        let streamQueue = []; // Bekleme kuyruğu
-
-        // Eş zamanlı stream sayısını kontrol et
-        function canStartNewStream() {
-            const activeStreamCount = Object.values(activeVideos).filter(stream => stream !== null).length;
-            console.log('Active stream count:', activeStreamCount, 'Max allowed:', maxConcurrentStreams);
-            return activeStreamCount < maxConcurrentStreams;
-        }
-
-        // Stream başlatmadan önce eski stream'leri kontrol et
-        function cleanupOldStreams() {
-            const activeStreams = Object.keys(activeVideos).filter(key => activeVideos[key] !== null);
-
-            if (activeStreams.length >= maxConcurrentStreams) {
-                // En eski stream'i durdur
-                const oldestStream = activeStreams[0]; // İlk stream'i al
-                const cameraId = oldestStream.replace('small_', '');
-                console.log('Stopping oldest stream:', cameraId);
-
-                stopVideo(cameraId);
-                resetVideoUI(cameraId);
-            }
-        }
-
-        // toggleVideo fonksiyonunu güncelleyin:
-        function toggleVideo(cameraId) {
-            console.log('toggleVideo called for camera:', cameraId);
-
-            const camera = cameras.find(cam => cam.id === cameraId);
-            console.log('Found camera:', camera);
-
-            if (!camera || camera.status !== 'live') {
-                console.log('Camera not found or not live:', camera);
-                alert('Bu kamera şu anda canlı yayında değil.');
-                return;
-            }
-
-            const streamKey = `small_${cameraId}`;
-            const isPlaying = activeVideos[streamKey];
-            console.log('Stream key:', streamKey, 'Is playing:', isPlaying);
-
-            if (isPlaying) {
-                // Video durduruluyor
-                console.log('Stopping video...');
-                stopVideoAndUpdateUI(cameraId);
-            } else {
-                // Yeni video başlatmaya çalışıyoruz
-                if (!canStartNewStream()) {
-                    const userConfirm = confirm(
-                        'Maksimum eş zamanlı yayın sayısına ulaştınız. ' +
-                        'Yeni yayını başlatmak için en eski yayın durdurulacak. Devam etmek istiyor musunuz?'
-                    );
-
-                    if (!userConfirm) {
-                        return;
-                    }
-
-                    cleanupOldStreams();
-                }
-
-                console.log('Starting video...');
-                startVideoAndUpdateUI(cameraId, camera);
-            }
-        }
-
-        function stopVideoAndUpdateUI(cameraId) {
-            const video = document.getElementById(`video-${cameraId}`);
-            const placeholder = document.getElementById(`placeholder-${cameraId}`);
-            const overlay = document.getElementById(`overlay-${cameraId}`);
-            const playIcon = document.getElementById(`play-icon-${cameraId}`);
-            const btnIcon = document.getElementById(`btn-icon-${cameraId}`);
-            const btnText = document.getElementById(`btn-text-${cameraId}`);
-            const playBtn = document.getElementById(`play-btn-${cameraId}`);
-
-            // Video'yu durdur
-            stopVideo(cameraId);
-
-            // UI güncellemeleri
-            if (video) video.style.display = 'none';
-            if (placeholder) placeholder.style.display = 'flex';
-            if (overlay) overlay.style.opacity = '0';
-            if (playIcon) playIcon.className = 'fas fa-play';
-            if (btnIcon) btnIcon.className = 'fas fa-play';
-            if (btnText) btnText.textContent = 'Oynat';
-            if (playBtn) playBtn.classList.remove('playing');
-
-            const streamKey = `small_${cameraId}`;
-            activeVideos[streamKey] = null;
-        }
-
-        function startVideoAndUpdateUI(cameraId, camera) {
-            const video = document.getElementById(`video-${cameraId}`);
-            const placeholder = document.getElementById(`placeholder-${cameraId}`);
-            const playIcon = document.getElementById(`play-icon-${cameraId}`);
-            const btnIcon = document.getElementById(`btn-icon-${cameraId}`);
-            const btnText = document.getElementById(`btn-text-${cameraId}`);
-            const playBtn = document.getElementById(`play-btn-${cameraId}`);
-
-            // Loading state'i göster
-            if (btnText) btnText.textContent = 'Yükleniyor...';
-            if (btnIcon) btnIcon.className = 'fas fa-spinner fa-spin';
-            if (playBtn) playBtn.disabled = true;
-
-            // Video oynat
-            playSmallVideo(camera, cameraId);
-
-            // Başarı durumunda UI güncelle (playSmallVideo içinde yapılacak)
-            setTimeout(() => {
-                if (placeholder) placeholder.style.display = 'none';
-                if (video) video.style.display = 'block';
-                if (playIcon) playIcon.className = 'fas fa-pause';
-                if (btnIcon) btnIcon.className = 'fas fa-pause';
-                if (btnText) btnText.textContent = 'Durdur';
-                if (playBtn) {
-                    playBtn.classList.add('playing');
-                    playBtn.disabled = false;
-                }
-
-                incrementViewer(cameraId);
-            }, 2000); // 2 saniye sonra UI'yi güncelle
-        }
-
-        // URL kontrol fonksiyonu ekleyin:
-        function validateStreamUrl(url) {
-            try {
-                const urlObj = new URL(url);
-                return urlObj.protocol === 'http:' || urlObj.protocol === 'https:';
-            } catch (e) {
-                return false;
-            }
-        }
-
-        // Stream sağlık kontrolü
-        function checkStreamHealth(cameraId) {
-            const video = document.getElementById(`video-${cameraId}`);
-            if (!video) return false;
-
-            // Video donmuş mu kontrol et
-            const currentTime = video.currentTime;
-            setTimeout(() => {
-                if (video.currentTime === currentTime && !video.paused && !video.ended) {
-                    console.warn('Stream seems frozen for camera:', cameraId);
-                    // Stream donmuş, yeniden başlat
-                    const camera = cameras.find(cam => cam.id === cameraId);
-                    if (camera) {
-                        console.log('Restarting frozen stream for:', cameraId);
-                        stopVideoAndUpdateUI(cameraId);
-                        setTimeout(() => startVideoAndUpdateUI(cameraId, camera), 1000);
-                    }
-                }
-            }, 5000); // 5 saniye sonra kontrol et
-        }
-
-        // Periyodik sağlık kontrolü
-        setInterval(() => {
-            Object.keys(activeVideos).forEach(streamKey => {
-                if (activeVideos[streamKey] !== null) {
-                    const cameraId = streamKey.replace('small_', '');
-                    checkStreamHealth(cameraId);
-                }
-            });
-        }, 30000); // Her 30 saniyede bir kontrol et
-
-        // Sayfa kapatılmadan önce temizlik
-        window.addEventListener('beforeunload', function () {
-            console.log('Page unloading, cleaning up streams...');
-            Object.keys(activeVideos).forEach(streamKey => {
-                if (streamKey.includes('small_')) {
-                    const cameraId = streamKey.replace('small_', '');
-                    stopVideo(cameraId);
-                }
-            });
-
-            if (currentHls) {
-                currentHls.destroy();
-            }
-        });
-
-        // Hızlı tıklama engelleyici
-        let lastClickTime = 0;
-        const clickThreshold = 1000; // 1 saniye
-
-        function isRapidClick() {
-            const currentTime = Date.now();
-            if (currentTime - lastClickTime < clickThreshold) {
-                console.log('Rapid click detected, ignoring...');
-                return true;
-            }
-            lastClickTime = currentTime;
-            return false;
-        }
-
-        // toggleVideo çağrısından önce hızlı tıklama kontrolü yapın
-        const originalToggleVideo = toggleVideo;
-        toggleVideo = function (cameraId) {
-            if (isRapidClick()) {
-                return;
-            }
-            return originalToggleVideo(cameraId);
-        };
+        let maxConcurrentStreams = 5; // 2 dakika delay ile daha fazla stream açabilirsiniz
 
         // API'den yayınları yükle
         async function fetchStreams() {
@@ -758,11 +571,11 @@
                 const response = await fetch('/api/streams/public');
                 const result = await response.json();
 
-                console.log('API Response:', result); // Debug log
+                console.log('API Response:', result);
 
                 if (result.success) {
                     cameras = result.data;
-                    console.log('Loaded cameras:', cameras); // Debug log
+                    console.log('Loaded cameras:', cameras);
 
                     hideLoadingState();
                     loadCameras();
@@ -879,233 +692,159 @@
             return card;
         }
 
-        // Küçük playerde video oynat/durdur
+        // Video oynatma fonksiyonu - 2 dakika delay için optimize
         function toggleVideo(cameraId) {
             console.log('toggleVideo called for camera:', cameraId);
 
             const camera = cameras.find(cam => cam.id === cameraId);
-            console.log('Found camera:', camera);
-
             if (!camera || camera.status !== 'live') {
-                console.log('Camera not found or not live:', camera);
                 alert('Bu kamera şu anda canlı yayında değil.');
                 return;
             }
 
-            const video = document.getElementById(`video-${cameraId}`);
-            const placeholder = document.getElementById(`placeholder-${cameraId}`);
-            const overlay = document.getElementById(`overlay-${cameraId}`);
-            const playIcon = document.getElementById(`play-icon-${cameraId}`);
+            const streamKey = `small_${cameraId}`;
+            const isPlaying = activeVideos[streamKey];
+
+            if (isPlaying) {
+                stopVideoAndUpdateUI(cameraId);
+            } else {
+                if (Object.values(activeVideos).filter(v => v !== null).length >= maxConcurrentStreams) {
+                    if (!confirm(`Maksimum ${maxConcurrentStreams} eş zamanlı yayın açabilirsiniz. En eski yayın durdurulsun mu?`)) {
+                        return;
+                    }
+                    cleanupOldStreams();
+                }
+                startVideoAndUpdateUI(cameraId, camera);
+            }
+        }
+
+        function startVideoAndUpdateUI(cameraId, camera) {
             const btnIcon = document.getElementById(`btn-icon-${cameraId}`);
             const btnText = document.getElementById(`btn-text-${cameraId}`);
             const playBtn = document.getElementById(`play-btn-${cameraId}`);
 
-            console.log('Video element:', video);
-            console.log('Stream URL:', camera.streamUrl);
+            // Loading state
+            if (btnText) btnText.textContent = 'Yükleniyor...';
+            if (btnIcon) btnIcon.className = 'fas fa-spinner fa-spin';
+            if (playBtn) playBtn.disabled = true;
 
-            const streamKey = `small_${cameraId}`;
-            const isPlaying = activeVideos[streamKey];
-            console.log('Stream key:', streamKey, 'Is playing:', isPlaying);
-
-            if (isPlaying) {
-                console.log('Stopping video...');
-                // Video durduruluyor
-                stopVideo(cameraId);
-
-                // UI güncellemeleri
-                video.style.display = 'none';
-                placeholder.style.display = 'flex';
-                overlay.style.opacity = '0';
-                playIcon.className = 'fas fa-play';
-                btnIcon.className = 'fas fa-play';
-                btnText.textContent = 'Oynat';
-                playBtn.classList.remove('playing');
-
-                activeVideos[streamKey] = null;
-            } else {
-                console.log('Starting video...');
-                // Video oynatılıyor
-                playSmallVideo(camera, cameraId);
-
-                // UI güncellemeleri
-                placeholder.style.display = 'none';
-                video.style.display = 'block';
-                playIcon.className = 'fas fa-pause';
-                btnIcon.className = 'fas fa-pause';
-                btnText.textContent = 'Durdur';
-                playBtn.classList.add('playing');
-
-                incrementViewer(cameraId);
-            }
+            playSmallVideo(camera, cameraId);
         }
 
         function playSmallVideo(camera, cameraId) {
-            console.log('playSmallVideo called for:', camera.name, 'URL:', camera.streamUrl);
-
             const video = document.getElementById(`video-${cameraId}`);
             const streamKey = `small_${cameraId}`;
 
             if (!video) {
-                console.error('Video element not found for camera:', cameraId);
+                console.error('Video element not found');
                 return;
             }
 
-            // Stream URL'ini kontrol et
             let streamUrl = camera.streamUrl;
-            console.log('Original stream URL:', streamUrl);
-
-            // Eğer relative path ise full path yap
             if (streamUrl.startsWith('/')) {
                 streamUrl = window.location.origin + streamUrl;
-                console.log('Updated stream URL:', streamUrl);
             }
 
             if (Hls.isSupported()) {
-                console.log('HLS.js supported, creating HLS instance...');
-
-                // Mevcut HLS instance'ı temizle
+                // Mevcut HLS instance temizle
                 if (activeVideos[streamKey]) {
-                    console.log('Destroying existing HLS instance');
                     try {
                         activeVideos[streamKey].destroy();
                     } catch (e) {
                         console.warn('Error destroying HLS instance:', e);
                     }
-                    activeVideos[streamKey] = null;
                 }
 
-                // Video element'i temizle
                 video.src = '';
                 video.load();
 
+                // 2 dakika delay için optimize edilmiş HLS config
                 const hls = new Hls({
                     debug: false,
-                    enableWorker: true,
+                    enableWorker: true,              // Worker açık olsun, CPU rahatlar
+                    lowLatencyMode: false,
 
-                    // Daha agresif buffer yönetimi
-                    maxBufferLength: 10,        // 10 saniye buffer
-                    maxMaxBufferLength: 20,     // Max 20 saniye
-                    liveSyncDuration: 1,        // 1 saniye sync
-                    liveMaxLatencyDuration: 5,  // Max 5 saniye gecikme
+                    // Bufferı HLS list_size’a uygun yap
+                    backBufferLength: 120,           // 2 dakika geriyi sakla
+                    maxBufferLength: 120,
+                    maxMaxBufferLength: 180,
+                    maxBufferSize: 120 * 1000 * 1000,
 
-                    // Fragment loading optimizasyonları
-                    fragLoadingTimeOut: 10000,
-                    fragLoadingMaxRetry: 2,
-                    manifestLoadingTimeOut: 8000,
-                    manifestLoadingMaxRetry: 2,
+                    // Error resilience
+                    fragLoadingTimeOut: 20000,
+                    fragLoadingMaxRetry: 3,
+                    manifestLoadingTimeOut: 10000,
+                    manifestLoadingMaxRetry: 3,
 
-                    // Hata recovery ayarları
-                    maxBufferHole: 0.3,
-                    nudgeOffset: 0.1,
-                    nudgeMaxRetry: 2,
+                    // Bandwidth adaptation
+                    abrEwmaDefaultEstimate: 1000000,
+                    startLevel: -1,
 
-                    // Bandwidth tahminleri
-                    abrEwmaDefaultEstimate: 500000,
-                    abrBandWidthFactor: 0.8,
-                    abrBandWidthUpFactor: 0.6,
-
-                    // Backoff stratejisi
-                    levelLoadingTimeOut: 8000,
-                    levelLoadingMaxRetry: 2,
-
-                    // Düşük gecikme modu kapalı (sorun yaratabilir)
-                    lowLatencyMode: false
+                    // Manifest retry
+                    manifestLoadingRetryDelay: 2000,
+                    levelLoadingRetryDelay: 2000
                 });
 
-                // Hata sayacı ekle
-                hls.errorCount = 0;
-                hls.maxErrors = 3;
 
                 hls.loadSource(streamUrl);
                 hls.attachMedia(video);
 
                 hls.on(Hls.Events.MANIFEST_PARSED, function () {
-                    console.log('HLS manifest parsed successfully for', cameraId);
-
-                    // Video element ayarları
                     video.muted = true;
                     video.playsInline = true;
 
-                    // Autoplay dene
-                    const playPromise = video.play();
-
-                    if (playPromise !== undefined) {
-                        playPromise.then(() => {
-                            console.log('Video started playing for', cameraId);
-                            activeVideos[streamKey] = hls;
-                            hls.errorCount = 0; // Reset error count on success
-                        }).catch(e => {
-                            console.error('Video play failed for', cameraId, ':', e);
-                            handlePlayError(e, cameraId, hls);
-                        });
-                    } else {
-                        // Eski tarayıcılar için
+                    video.play().then(() => {
+                        console.log('Video started playing for', cameraId);
                         activeVideos[streamKey] = hls;
-                    }
+                        updateVideoUI(cameraId, true);
+                        incrementViewer(cameraId);
+                    }).catch(e => {
+                        console.error('Video play failed:', e);
+                        resetVideoUI(cameraId);
+                    });
                 });
 
                 hls.on(Hls.Events.ERROR, function (event, data) {
-                    console.error('HLS Error for', cameraId, ':', event, data);
-
-                    // Hata sayısını artır
-                    hls.errorCount = (hls.errorCount || 0) + 1;
-
-                    // Non-fatal hatalar için retry mantığı
-                    if (!data.fatal) {
-                        console.warn(`Non-fatal HLS error for ${cameraId}, continuing... (Error count: ${hls.errorCount})`);
-
-                        // Çok fazla non-fatal hata varsa stream'i durdur
-                        if (hls.errorCount > hls.maxErrors) {
-                            console.error(`Too many errors for ${cameraId}, stopping stream`);
-                            stopVideo(cameraId);
-                            resetVideoUI(cameraId);
-                            alert('Video yayınında çok fazla hata oluştu. Lütfen tekrar deneyin.');
+                    console.error('HLS Error:', data);
+                    if (data.fatal) {
+                        switch (data.type) {
+                            case Hls.ErrorTypes.NETWORK_ERROR:
+                                console.log('Network error, trying to recover...');
+                                hls.startLoad();
+                                break;
+                            case Hls.ErrorTypes.MEDIA_ERROR:
+                                console.log('Media error, trying to recover...');
+                                hls.recoverMediaError();
+                                break;
+                            default:
+                                console.error('Fatal error, destroying HLS');
+                                resetVideoUI(cameraId);
+                                break;
                         }
-                        return;
                     }
-
-                    // Fatal hata türlerine göre farklı aksiyonlar
-                    handleFatalHLSError(data, cameraId, hls);
-                });
-
-                // Diğer event'ler
-                hls.on(Hls.Events.MEDIA_ATTACHED, function () {
-                    console.log('HLS media attached for', cameraId);
-                });
-
-                hls.on(Hls.Events.BUFFER_STALLED, function () {
-                    console.warn('Buffer stalled for', cameraId);
-                });
-
-                hls.on(Hls.Events.BUFFER_RESET, function () {
-                    console.log('Buffer reset for', cameraId);
                 });
 
             } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                console.log('Native HLS support detected for', cameraId);
-
-                // Native HLS için basit ayar
+                // Native HLS support
                 video.src = streamUrl;
                 video.muted = true;
                 video.playsInline = true;
 
                 video.play().then(() => {
-                    console.log('Native HLS video started playing for', cameraId);
                     activeVideos[streamKey] = true;
+                    updateVideoUI(cameraId, true);
+                    incrementViewer(cameraId);
                 }).catch(e => {
-                    console.error('Native HLS play failed for', cameraId, ':', e);
-                    alert('Video oynatılamadı: ' + e.message);
+                    console.error('Native HLS play failed:', e);
                     resetVideoUI(cameraId);
                 });
             } else {
-                console.error('HLS not supported in this browser');
-                alert('Tarayıcınız bu video formatını desteklemiyor.');
+                alert('Bu tarayıcı HLS formatını desteklemiyor');
                 resetVideoUI(cameraId);
-                return;
             }
         }
 
-        function resetVideoUI(cameraId) {
+        function updateVideoUI(cameraId, isPlaying) {
             const video = document.getElementById(`video-${cameraId}`);
             const placeholder = document.getElementById(`placeholder-${cameraId}`);
             const playIcon = document.getElementById(`play-icon-${cameraId}`);
@@ -1113,27 +852,47 @@
             const btnText = document.getElementById(`btn-text-${cameraId}`);
             const playBtn = document.getElementById(`play-btn-${cameraId}`);
 
-            if (video) video.style.display = 'none';
-            if (placeholder) placeholder.style.display = 'flex';
-            if (playIcon) playIcon.className = 'fas fa-play';
-            if (btnIcon) btnIcon.className = 'fas fa-play';
-            if (btnText) btnText.textContent = 'Oynat';
-            if (playBtn) playBtn.classList.remove('playing');
+            if (isPlaying) {
+                if (video) video.style.display = 'block';
+                if (placeholder) placeholder.style.display = 'none';
+                if (playIcon) playIcon.className = 'fas fa-pause';
+                if (btnIcon) btnIcon.className = 'fas fa-pause';
+                if (btnText) btnText.textContent = 'Durdur';
+                if (playBtn) {
+                    playBtn.classList.add('playing');
+                    playBtn.disabled = false;
+                }
+            } else {
+                if (video) video.style.display = 'none';
+                if (placeholder) placeholder.style.display = 'flex';
+                if (playIcon) playIcon.className = 'fas fa-play';
+                if (btnIcon) btnIcon.className = 'fas fa-play';
+                if (btnText) btnText.textContent = 'Oynat';
+                if (playBtn) {
+                    playBtn.classList.remove('playing');
+                    playBtn.disabled = false;
+                }
+            }
+        }
+
+        function stopVideoAndUpdateUI(cameraId) {
+            stopVideo(cameraId);
+            updateVideoUI(cameraId, false);
+
+            const streamKey = `small_${cameraId}`;
+            activeVideos[streamKey] = null;
         }
 
         function stopVideo(cameraId) {
             const video = document.getElementById(`video-${cameraId}`);
             const streamKey = `small_${cameraId}`;
 
-            console.log('Stopping video for camera:', cameraId);
-
             if (activeVideos[streamKey]) {
                 if (typeof activeVideos[streamKey] === 'object' && activeVideos[streamKey].destroy) {
-                    console.log('Destroying HLS instance for', cameraId);
                     try {
                         activeVideos[streamKey].destroy();
                     } catch (e) {
-                        console.warn('Error destroying HLS for', cameraId, ':', e);
+                        console.warn('Error destroying HLS:', e);
                     }
                 }
                 activeVideos[streamKey] = null;
@@ -1142,7 +901,20 @@
             if (video) {
                 video.pause();
                 video.src = '';
-                video.load(); // Video element'i temizle
+                video.load();
+            }
+        }
+
+        function resetVideoUI(cameraId) {
+            updateVideoUI(cameraId, false);
+        }
+
+        function cleanupOldStreams() {
+            const activeStreams = Object.keys(activeVideos).filter(key => activeVideos[key] !== null);
+            if (activeStreams.length > 0) {
+                const oldestStream = activeStreams[0];
+                const cameraId = oldestStream.replace('small_', '');
+                stopVideoAndUpdateUI(cameraId);
             }
         }
 
@@ -1157,9 +929,8 @@
             const modalVideo = document.getElementById('modalVideo');
             const modalName = document.getElementById('modalCameraName');
 
-            modalName.textContent = camera.name;
 
-            // HLS.js ile video yükle
+            // Full screen için aynı HLS config
             if (Hls.isSupported()) {
                 if (currentHls) {
                     currentHls.destroy();
@@ -1167,11 +938,10 @@
 
                 currentHls = new Hls({
                     debug: false,
-                    enableWorker: true,
-                    lowLatencyMode: true,
-                    liveSyncDuration: 2,
-                    liveMaxLatencyDuration: 8,
-                    maxBufferLength: 10
+                    enableWorker: false,
+                    lowLatencyMode: false,
+                    maxBufferLength: 30,
+                    maxMaxBufferLength: 60
                 });
 
                 currentHls.loadSource(camera.streamUrl);
@@ -1185,7 +955,7 @@
                 });
 
                 currentHls.on(Hls.Events.ERROR, function (event, data) {
-                    console.error('HLS Error:', data);
+                    console.error('Modal HLS Error:', data);
                     if (data.fatal) {
                         alert('Video yüklenirken hata oluştu.');
                         closeModal();
@@ -1199,7 +969,7 @@
                 });
                 incrementViewer(camera.id);
             } else {
-                alert('Tarayıcınız bu video formatını desteklemiyor.');
+                alert('Bu tarayıcı HLS formatını desteklemiyor.');
                 return;
             }
 
@@ -1290,7 +1060,7 @@
         document.addEventListener('DOMContentLoaded', function () {
             fetchStreams();
             // 30 saniyede bir güncelle
-            setInterval(fetchStreams, 30000);
+            setInterval(fetchStreams, 300000);
         });
 
         // Sayfa kapanırken videoları temizle
@@ -1320,66 +1090,6 @@
                 closeModal();
             }
         });
-        function handlePlayError(error, cameraId, hls) {
-            if (error.name === 'NotAllowedError') {
-                console.log('Autoplay blocked, trying user interaction for', cameraId);
-                // Kullanıcı etkileşimi gerekiyor
-                alert('Video oynatmak için sayfa ile etkileşim gerekiyor. Lütfen tekrar deneyin.');
-                stopVideo(cameraId);
-                resetVideoUI(cameraId);
-            } else if (error.name === 'AbortError') {
-                console.log('Play aborted for', cameraId);
-                // Genellikle kullanıcı hızlı tıklamalar yaptığında olur
-            } else {
-                console.error('Unexpected play error for', cameraId, ':', error);
-                alert('Video oynatılamadı: ' + error.message);
-                stopVideo(cameraId);
-                resetVideoUI(cameraId);
-            }
-        }
-
-        function handleFatalHLSError(data, cameraId, hls) {
-            console.error('Fatal HLS error for', cameraId, ':', data.type, data.details);
-
-            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                console.error('Network error for', cameraId, ', trying to recover...');
-
-                setTimeout(() => {
-                    if (hls && !hls.destroyed) {
-                        try {
-                            hls.startLoad();
-                        } catch (e) {
-                            console.error('Recovery failed for', cameraId, ':', e);
-                            fallbackError(cameraId);
-                        }
-                    }
-                }, 1000);
-
-            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                console.error('Media error for', cameraId, ', trying to recover...');
-
-                setTimeout(() => {
-                    if (hls && !hls.destroyed) {
-                        try {
-                            hls.recoverMediaError();
-                        } catch (e) {
-                            console.error('Media recovery failed for', cameraId, ':', e);
-                            fallbackError(cameraId);
-                        }
-                    }
-                }, 1000);
-
-            } else {
-                fallbackError(cameraId);
-            }
-        }
-
-        function fallbackError(cameraId) {
-            console.error('All recovery attempts failed for', cameraId);
-            alert('Video yüklenirken hata oluştu. Lütfen sayfayı yenileyin veya daha sonra tekrar deneyin.');
-            stopVideo(cameraId);
-            resetVideoUI(cameraId);
-        }
     </script>
 </body>
 

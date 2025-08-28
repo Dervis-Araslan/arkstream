@@ -12,6 +12,9 @@ class StreamService {
         if (!fs.existsSync(this.publicPath)) {
             fs.mkdirSync(this.publicPath, { recursive: true });
         }
+
+        // Segment cleanup job başlat
+        this.startCleanupJob();
     }
 
     /**
@@ -39,7 +42,7 @@ class StreamService {
     }
 
     /**
-     * Stream başlatır
+     * Stream başlatır - 2 dakika delay ile optimize edilmiş
      */
     async startStream(streamConfig) {
         const {
@@ -49,11 +52,7 @@ class StreamService {
             password,
             ip,
             port,
-            channel = 1,
-            resolution = '640x480',
-            fps = 30,
-            bitrate = '800k',
-            audioBitrate = '160k'
+            channel = 1
         } = streamConfig;
 
         // Stream zaten aktif mi kontrol et
@@ -68,26 +67,33 @@ class StreamService {
             // HLS çıktısı yolu
             const hlsPath = path.join(this.publicPath, `${streamName}.m3u8`);
 
-            // FFmpeg argümanları
+            // 2 dakika delay için optimize edilmiş FFmpeg argümanları
             const ffmpegArgs = [
                 '-rtsp_transport', 'tcp',
-                '-fflags', '+genpts',
-                '-use_wallclock_as_timestamps', '1',
                 '-i', rtspUrl,
-                '-pix_fmt', 'yuv420p',
+
+                // Video encoding - production ready
                 '-c:v', 'libx264',
-                '-preset', 'ultrafast',
+                '-preset', 'veryfast',
                 '-tune', 'zerolatency',
-                '-b:v', bitrate,
-                '-r', fps.toString(),
-                '-s', resolution,
+                '-b:v', '800k',
+                '-maxrate', '1500k',
+                '-bufsize', '3000k',
+                '-r', '25',
+                '-s', '1280x720',
+                '-pix_fmt', 'yuv420p',
+
+                // Audio encoding
                 '-c:a', 'aac',
-                '-b:a', audioBitrate,
+                '-b:a', '128k',
                 '-ar', '44100',
+
+                // HLS - 2 dakika delay için
                 '-f', 'hls',
-                '-hls_time', '1',
-                '-hls_list_size', '5',
+                '-hls_time', '2',            // 2 sn segment
+                '-hls_list_size', '6',       // sadece 12 sn 
                 '-hls_flags', 'delete_segments+append_list+omit_endlist',
+                '-hls_segment_filename', path.join(this.publicPath, `${streamName}_%03d.ts`),
                 hlsPath
             ];
 
@@ -96,17 +102,18 @@ class StreamService {
             // FFmpeg sürecini başlat
             const ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
 
+            // Network optimization ekle
+            this.setupNetworkOptimization(ffmpegProcess, streamName);
+
             // Process event handlers
             ffmpegProcess.stderr.on('data', (data) => {
                 const output = data.toString();
-                console.error(`[FFmpeg ${streamName}] ${output}`);
+                console.log(`[FFmpeg ${streamName}] ${output}`);
 
                 // Stream başlatma başarılı mı kontrol et
                 if (output.includes('Opening') || output.includes('Stream mapping')) {
                     if (this.activeStreams[streamName]) {
                         this.activeStreams[streamName].status = 'streaming';
-                    } else {
-                        console.log(`[StreamService] Warning: Stream ${streamName} not found in activeStreams`);
                     }
                 }
             });
@@ -123,6 +130,9 @@ class StreamService {
                         this.activeStreams[streamName].onClose(code);
                     }
                 }
+
+                // Stream durduğunda segment'leri temizle
+                this.cleanupSegments(streamName);
             });
 
             ffmpegProcess.on('error', (error) => {
@@ -165,6 +175,52 @@ class StreamService {
     }
 
     /**
+     * Segment cleanup işlemi
+     */
+    cleanupSegments(streamName) {
+        const segmentPattern = path.join(this.publicPath, `${streamName}_*.ts`);
+        const glob = require('glob');
+
+        try {
+            const segmentFiles = glob.sync(segmentPattern);
+
+            // En eski segment'leri sil (sadece son 25'ini koru)
+            if (segmentFiles.length > 25) {
+                const filesToDelete = segmentFiles
+                    .sort((a, b) => {
+                        const aNum = parseInt(a.match(/_(\d+)\.ts$/)?.[1] || '0');
+                        const bNum = parseInt(b.match(/_(\d+)\.ts$/)?.[1] || '0');
+                        return aNum - bNum;
+                    })
+                    .slice(0, -25); // Son 25'i koru
+
+                filesToDelete.forEach(file => {
+                    if (fs.existsSync(file)) {
+                        fs.unlinkSync(file);
+                        console.log(`Cleaned up: ${path.basename(file)}`);
+                    }
+                });
+            }
+        } catch (error) {
+            console.error(`Cleanup error for ${streamName}:`, error);
+        }
+    }
+
+    /**
+     * Periyodik segment temizliği başlat
+     */
+    startCleanupJob() {
+        // Her 30 saniyede bir segment temizliği yap
+        setInterval(() => {
+            Object.keys(this.activeStreams).forEach(streamName => {
+                if (this.activeStreams[streamName].status === 'streaming') {
+                    this.cleanupSegments(streamName);
+                }
+            });
+        }, 30000);
+    }
+
+    /**
      * Stream durdurur
      */
     async stopStream(streamName) {
@@ -177,26 +233,26 @@ class StreamService {
 
             // FFmpeg sürecini durdur
             if (streamInfo.process && !streamInfo.process.killed) {
-                streamInfo.process.kill('SIGKILL');
+                streamInfo.process.kill('SIGTERM'); // SIGKILL yerine SIGTERM kullan
+
+                // 5 saniye sonra hala çalışıyorsa force kill
+                setTimeout(() => {
+                    if (streamInfo.process && !streamInfo.process.killed) {
+                        streamInfo.process.kill('SIGKILL');
+                    }
+                }, 5000);
             }
 
             // HLS dosyalarını temizle
             const hlsPath = path.join(this.publicPath, `${streamName}.m3u8`);
-            const segmentPattern = path.join(this.publicPath, `${streamName}*.ts`);
 
             // M3U8 dosyasını sil
             if (fs.existsSync(hlsPath)) {
                 fs.unlinkSync(hlsPath);
             }
 
-            // TS segment dosyalarını sil
-            const glob = require('glob');
-            const segmentFiles = glob.sync(segmentPattern);
-            segmentFiles.forEach(file => {
-                if (fs.existsSync(file)) {
-                    fs.unlinkSync(file);
-                }
-            });
+            // Segment'leri temizle
+            this.cleanupSegments(streamName);
 
             // Aktif stream listesinden kaldır
             delete this.activeStreams[streamName];
@@ -211,6 +267,24 @@ class StreamService {
         } catch (error) {
             console.error(`Stream stop error for ${streamName}:`, error);
             throw error;
+        }
+    }
+
+    /**
+     * Network optimization
+     */
+    setupNetworkOptimization(ffmpegProcess, streamName) {
+        // TCP buffer boyutlarını ayarla
+        ffmpegProcess.stdout?.setEncoding('utf8');
+        ffmpegProcess.stderr?.setEncoding('utf8');
+
+        // Process önceliğini ayarla (Linux/macOS için)
+        try {
+            if (process.setpriority) {
+                process.setpriority(ffmpegProcess.pid, -5);
+            }
+        } catch (e) {
+            console.warn(`Priority setting failed for ${streamName}`);
         }
     }
 

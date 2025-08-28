@@ -31,7 +31,9 @@ app.use('/admin', adminRoutes);
 // Basic routes
 const publicRoutes = require('./routers/public');
 app.use('/', publicRoutes);
-const SERVER_HOST = process.env.SERVER_HOST + ":" + process.env.PORT || getServerIp() + ":" + + process.env.PORT;
+const SERVER_HOST = process.env.USE_NGINX === 'true'
+    ? (process.env.NGINX_HOST || 'http://localhost:8080')
+    : (process.env.SERVER_HOST + ":" + process.env.PORT || getServerIp() + ":" + process.env.PORT);
 
 // API routes
 app.get('/api/health', (req, res) => {

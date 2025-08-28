@@ -11,7 +11,9 @@ const router = express.Router();
 const activeStreams = {};
 // Multer middleware for form data handling
 const upload = multer();
-const SERVER_HOST = process.env.SERVER_HOST + ":" + process.env.PORT || getServerIp() + ":" + + process.env.PORT;
+const SERVER_HOST = process.env.USE_NGINX === 'true'
+    ? (process.env.NGINX_HOST || 'http://localhost:8080')
+    : (process.env.SERVER_HOST + ":" + process.env.PORT || getServerIp() + ":" + process.env.PORT);
 
 // Session middleware for admin panel
 router.use(session({
