@@ -6,7 +6,7 @@ const fs = require('fs');
 class StreamService {
     constructor() {
         this.activeStreams = {};
-        this.publicPath = path.join(__dirname, '../../public');
+        this.publicPath = path.join(__dirname, '../../public/stream');
 
         // Public klasörünü oluştur
         if (!fs.existsSync(this.publicPath)) {
@@ -69,6 +69,8 @@ class StreamService {
 
             // 2 dakika delay için optimize edilmiş FFmpeg argümanları
             const ffmpegArgs = [
+                '-loglevel', 'error',
+
                 '-rtsp_transport', 'tcp',
                 '-i', rtspUrl,
 
@@ -156,14 +158,14 @@ class StreamService {
                 status: 'starting',
                 startedAt: new Date(),
                 config: streamConfig,
-                hlsUrl: `/static/${streamName}.m3u8`,
+                hlsUrl: `/static/stream/${streamName}.m3u8`,
                 rtspUrl: rtspUrl
             };
 
             return {
                 success: true,
                 streamName,
-                hlsUrl: `/static/${streamName}.m3u8`,
+                hlsUrl: `/static/stream/${streamName}.m3u8`,
                 pid: ffmpegProcess.pid,
                 status: 'starting'
             };

@@ -5,7 +5,14 @@ const { requireAuth, requireAdmin, loadUser } = require('../middleware/auth');
 const { Op } = require('sequelize');
 const os = require('os');
 const multer = require('multer'); // Form data için gerekli
-const { User, Camera, Stream } = require('../models');
+const { User, Camera, Stream, Category } = require('../models');
+const fs = require('fs').promises;
+const path = require('path');
+const sharp = require('sharp');
+const crypto = require('crypto');
+
+const SLIDER_DIR = path.join(__dirname, '../../public/assets/slider');
+const SLIDER_DATA_FILE = path.join(__dirname, '../data/slider-images.json');
 
 const router = express.Router();
 const activeStreams = {};
@@ -788,7 +795,8 @@ router.post('/api/streams', requireAuth, async (req, res) => {
                     { stream_name: { [Op.like]: searchValue } },
                     { ip_address: { [Op.like]: searchValue } },
                     { '$camera.name$': { [Op.like]: searchValue } },
-                    { '$camera.brand$': { [Op.like]: searchValue } }
+                    { '$camera.brand$': { [Op.like]: searchValue } },
+                    { '$categories.name$': { [Op.like]: searchValue } }
                 ]
             };
         }
@@ -809,13 +817,26 @@ router.post('/api/streams', requireAuth, async (req, res) => {
         }
 
         const totalRecords = await Stream.count();
-        const filteredRecords = await Stream.count({
-            where: whereCondition,
-            include: [{
-                model: Camera,
-                as: 'camera'
-            }]
-        });
+
+        // Filtered records için subquery kullan (many-to-many arama için)
+        let filteredRecords;
+        if (whereCondition[Op.or]) {
+            filteredRecords = await Stream.count({
+                where: whereCondition,
+                include: [{
+                    model: Camera,
+                    as: 'camera',
+                    required: false
+                }, {
+                    model: Category,
+                    as: 'categories',
+                    required: false
+                }],
+                distinct: true // Many-to-many ilişkide duplicate'ları önler
+            });
+        } else {
+            filteredRecords = totalRecords;
+        }
 
         const streams = await Stream.findAll({
             where: whereCondition,
@@ -826,7 +847,14 @@ router.post('/api/streams', requireAuth, async (req, res) => {
                 model: Camera,
                 as: 'camera',
                 attributes: ['id', 'name', 'brand', 'model']
-            }]
+            }, {
+                model: Category,
+                as: 'categories',
+                attributes: ['id', 'name', 'color', 'icon'],
+                required: false,
+                through: { attributes: [] } // Junction table attributes'larını dahil etme
+            }],
+            distinct: true // Duplicate stream'leri önle
         });
 
         res.json({
@@ -897,7 +925,7 @@ router.post('/api/streams/create', upload.none(), requireAuth, async (req, res) 
             audio_bitrate: audio_bitrate || '160k',
             is_active: is_active === 'on' || is_active === true || is_active === '1' || is_active === 'true',
             is_recording: is_recording === 'on' || is_recording === true || is_recording === '1' || is_recording === 'true',
-            hls_url: `${SERVER_HOST}/static/${stream_name.trim()}.m3u8`
+            hls_url: `${SERVER_HOST}/static/stream/${stream_name.trim()}.m3u8`
         });
 
         res.json({
@@ -1000,7 +1028,7 @@ router.post('/api/streams/:id/start', requireAuth, async (req, res) => {
             await stream.update({
                 status: 'streaming',
                 process_id: result.pid,
-                hls_url: `${result.hlsUrl}`
+                hls_url: `${SERVER_HOST}${result.hlsUrl}`
             });
 
             res.json({
@@ -1216,7 +1244,7 @@ router.put('/api/streams/:id', upload.none(), requireAuth, async (req, res) => {
             audio_bitrate: audio_bitrate || '160k',
             is_active: is_active === 'on' || is_active === true || is_active === '1' || is_active === 'true',
             is_recording: is_recording === 'on' || is_recording === true || is_recording === '1' || is_recording === 'true',
-            hls_url: `${SERVER_HOST}/static/${stream_name.trim()}.m3u8`
+            hls_url: `${SERVER_HOST}/static/stream/${stream_name.trim()}.m3u8`
         };
 
         // DÜZELTME: Şifre sadece dolu gelirse güncelle
@@ -1305,6 +1333,11 @@ router.get('/api/streams/:id', requireAuth, async (req, res) => {
             include: [{
                 model: Camera,
                 as: 'camera'
+            }, {
+                model: Category,
+                as: 'categories',
+                attributes: ['id', 'name', 'color', 'icon'],
+                through: { attributes: [] }
             }]
         });
 
@@ -1370,14 +1403,44 @@ router.get('/api/stream-stats', requireAuth, async (req, res) => {
         const stoppedStreams = await Stream.count({ where: { status: 'stopped' } });
         const errorStreams = await Stream.count({ where: { status: 'error' } });
 
+        // Many-to-many kategori istatistikleri
+        const totalStreamCategoryRelations = await StreamCategory.count();
+        const categorizedStreams = await Stream.count({
+            include: [{
+                model: Category,
+                as: 'categories',
+                required: true
+            }],
+            distinct: true
+        });
+        const uncategorizedStreams = totalStreams - categorizedStreams;
+
         // Marka istatistikleri
         const brandStats = await Camera.findAll({
             attributes: [
                 'brand',
-                [sequelize.fn('COUNT', '*'), 'count']
+                [require('sequelize').fn('COUNT', '*'), 'count']
             ],
             group: ['brand'],
             raw: true
+        });
+
+        // En popüler kategoriler (en çok stream'e sahip)
+        const topCategories = await Category.findAll({
+            include: [{
+                model: Stream,
+                as: 'streams',
+                attributes: [],
+                where: { is_active: true },
+                required: false
+            }],
+            attributes: [
+                'id', 'name', 'color',
+                [require('sequelize').fn('COUNT', require('sequelize').col('streams.id')), 'stream_count']
+            ],
+            group: ['Category.id'],
+            order: [[require('sequelize').fn('COUNT', require('sequelize').col('streams.id')), 'DESC']],
+            limit: 5
         });
 
         res.json({
@@ -1393,7 +1456,18 @@ router.get('/api/stream-stats', requireAuth, async (req, res) => {
                     active: activeStreams,
                     streaming: streamingStreams,
                     stopped: stoppedStreams,
-                    error: errorStreams
+                    error: errorStreams,
+                    categorized: categorizedStreams,
+                    uncategorized: uncategorizedStreams
+                },
+                categories: {
+                    totalRelations: totalStreamCategoryRelations,
+                    topCategories: topCategories.map(cat => ({
+                        id: cat.id,
+                        name: cat.name,
+                        color: cat.color,
+                        streamCount: parseInt(cat.getDataValue('stream_count')) || 0
+                    }))
                 },
                 brandStats: brandStats.reduce((acc, item) => {
                     acc[item.brand] = parseInt(item.count);
@@ -1406,6 +1480,1018 @@ router.get('/api/stream-stats', requireAuth, async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'İstatistikler alınamadı'
+        });
+    }
+});
+
+async function ensureSliderDir() {
+    try {
+        await fs.access(SLIDER_DIR);
+    } catch (error) {
+        await fs.mkdir(SLIDER_DIR, { recursive: true });
+    }
+}
+
+// Slider veri dosyasını oluştur
+async function ensureSliderDataFile() {
+    try {
+        await fs.access(SLIDER_DATA_FILE);
+    } catch (error) {
+        // Data klasörünü oluştur
+        await fs.mkdir(path.dirname(SLIDER_DATA_FILE), { recursive: true });
+        await fs.writeFile(SLIDER_DATA_FILE, JSON.stringify([], null, 2));
+    }
+}
+
+// Slider verilerini oku
+async function readSliderData() {
+    try {
+        await ensureSliderDataFile();
+        const data = await fs.readFile(SLIDER_DATA_FILE, 'utf8');
+        return JSON.parse(data);
+    } catch (error) {
+        console.error('Error reading slider data:', error);
+        return [];
+    }
+}
+
+// Slider verilerini kaydet
+async function writeSliderData(data) {
+    try {
+        await ensureSliderDataFile();
+        await fs.writeFile(SLIDER_DATA_FILE, JSON.stringify(data, null, 2));
+    } catch (error) {
+        console.error('Error writing slider data:', error);
+        throw error;
+    }
+}
+
+// Multer storage configuration for slider images
+const sliderStorage = multer.diskStorage({
+    destination: async (req, file, cb) => {
+        await ensureSliderDir();
+        cb(null, SLIDER_DIR);
+    },
+    filename: (req, file, cb) => {
+        // Generate unique filename
+        const uniqueName = crypto.randomUUID();
+        const ext = path.extname(file.originalname).toLowerCase();
+        cb(null, `${uniqueName}${ext}`);
+    }
+});
+
+const sliderUpload = multer({
+    storage: sliderStorage,
+    fileFilter: (req, file, cb) => {
+        // Check file type
+        const allowedTypes = /jpeg|jpg|png|webp/;
+        const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+        const mimetype = allowedTypes.test(file.mimetype);
+
+        if (mimetype && extname) {
+            return cb(null, true);
+        } else {
+            cb(new Error('Sadece resim dosyaları (JPEG, PNG, WEBP) desteklenir'));
+        }
+    },
+    limits: {
+        fileSize: 10 * 1024 * 1024 // 10MB limit
+    }
+});
+
+// ============================================
+// SLIDER API ENDPOINTS
+// ============================================
+
+// Slider resimlerini listele
+router.get('/api/slider/images', requireAuth, async (req, res) => {
+    try {
+        const images = await readSliderData();
+
+        // Sort by order
+        images.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+        res.json({
+            success: true,
+            data: images
+        });
+    } catch (error) {
+        console.error('Get slider images error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Slider resimleri alınırken hata oluştu'
+        });
+    }
+});
+
+// Slider resim yükleme
+router.post('/api/slider/upload', requireAuth, sliderUpload.array('images', 10), async (req, res) => {
+    try {
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Hiç dosya yüklenmedi'
+            });
+        }
+
+        const existingImages = await readSliderData();
+        const newImages = [];
+
+        for (const file of req.files) {
+            try {
+                // Get image metadata using sharp
+                const metadata = await sharp(file.path).metadata();
+
+                // Create image record
+                const imageData = {
+                    id: crypto.randomUUID(),
+                    filename: file.filename,
+                    original_name: file.originalname,
+                    file_size: file.size,
+                    mime_type: file.mimetype,
+                    width: metadata.width,
+                    height: metadata.height,
+                    order: existingImages.length + newImages.length,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                };
+
+                newImages.push(imageData);
+            } catch (imageError) {
+                console.error('Error processing image:', imageError);
+                // Delete the problematic file
+                try {
+                    await fs.unlink(file.path);
+                } catch (unlinkError) {
+                    console.error('Error deleting problematic file:', unlinkError);
+                }
+            }
+        }
+
+        if (newImages.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Hiç resim işlenemedi. Dosyaların geçerli resim formatında olduğundan emin olun.'
+            });
+        }
+
+        // Add new images to existing data
+        const allImages = [...existingImages, ...newImages];
+        await writeSliderData(allImages);
+
+        res.json({
+            success: true,
+            message: `${newImages.length} resim başarıyla yüklendi`,
+            data: {
+                uploaded: newImages.length,
+                total: allImages.length,
+                images: newImages
+            }
+        });
+
+    } catch (error) {
+        console.error('Slider upload error:', error);
+
+        // Clean up uploaded files on error
+        if (req.files) {
+            for (const file of req.files) {
+                try {
+                    await fs.unlink(file.path);
+                } catch (unlinkError) {
+                    console.error('Error cleaning up file:', unlinkError);
+                }
+            }
+        }
+
+        let errorMessage = 'Resim yükleme sırasında hata oluştu';
+        if (error.code === 'LIMIT_FILE_SIZE') {
+            errorMessage = 'Dosya boyutu çok büyük. Maksimum 10MB olmalıdır.';
+        } else if (error.message.includes('desteklenir')) {
+            errorMessage = error.message;
+        }
+
+        res.status(400).json({
+            success: false,
+            message: errorMessage
+        });
+    }
+});
+
+// Slider resmi silme
+router.delete('/api/slider/images/:id', requireAuth, async (req, res) => {
+    try {
+        const imageId = req.params.id;
+        const images = await readSliderData();
+
+        const imageIndex = images.findIndex(img => img.id === imageId);
+        if (imageIndex === -1) {
+            return res.status(404).json({
+                success: false,
+                message: 'Resim bulunamadı'
+            });
+        }
+
+        const imageToDelete = images[imageIndex];
+
+        // Delete physical file
+        try {
+            await fs.unlink(path.join(SLIDER_DIR, imageToDelete.filename));
+        } catch (fileError) {
+            console.warn('File already deleted or not found:', fileError);
+        }
+
+        // Remove from data
+        images.splice(imageIndex, 1);
+
+        // Reorder remaining images
+        images.forEach((img, index) => {
+            img.order = index;
+            img.updated_at = new Date().toISOString();
+        });
+
+        await writeSliderData(images);
+
+        res.json({
+            success: true,
+            message: 'Resim başarıyla silindi',
+            data: {
+                deleted: imageToDelete.original_name,
+                remaining: images.length
+            }
+        });
+
+    } catch (error) {
+        console.error('Delete slider image error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Resim silinirken hata oluştu'
+        });
+    }
+});
+
+// Slider resim sıralamasını değiştir
+router.post('/api/slider/reorder', requireAuth, async (req, res) => {
+    try {
+        const { fromIndex, toIndex } = req.body;
+
+        if (typeof fromIndex !== 'number' || typeof toIndex !== 'number') {
+            return res.status(400).json({
+                success: false,
+                message: 'Geçersiz index değerleri'
+            });
+        }
+
+        const images = await readSliderData();
+
+        if (fromIndex < 0 || fromIndex >= images.length || toIndex < 0 || toIndex >= images.length) {
+            return res.status(400).json({
+                success: false,
+                message: 'Index değerleri geçerli aralıkta değil'
+            });
+        }
+
+        // Sort by current order
+        images.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+        // Move item
+        const [movedItem] = images.splice(fromIndex, 1);
+        images.splice(toIndex, 0, movedItem);
+
+        // Update order for all items
+        images.forEach((img, index) => {
+            img.order = index;
+            img.updated_at = new Date().toISOString();
+        });
+
+        await writeSliderData(images);
+
+        res.json({
+            success: true,
+            message: 'Sıralama başarıyla değiştirildi'
+        });
+
+    } catch (error) {
+        console.error('Reorder slider images error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Sıralama değiştirilirken hata oluştu'
+        });
+    }
+});
+
+// Slider resim bilgilerini güncelle
+router.put('/api/slider/images/:id', requireAuth, async (req, res) => {
+    try {
+        const imageId = req.params.id;
+        const { original_name } = req.body;
+
+        const images = await readSliderData();
+        const imageIndex = images.findIndex(img => img.id === imageId);
+
+        if (imageIndex === -1) {
+            return res.status(404).json({
+                success: false,
+                message: 'Resim bulunamadı'
+            });
+        }
+
+        // Update image data
+        if (original_name) {
+            images[imageIndex].original_name = original_name.trim();
+        }
+        images[imageIndex].updated_at = new Date().toISOString();
+
+        await writeSliderData(images);
+
+        res.json({
+            success: true,
+            message: 'Resim bilgileri güncellendi',
+            data: images[imageIndex]
+        });
+
+    } catch (error) {
+        console.error('Update slider image error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Resim güncellenirken hata oluştu'
+        });
+    }
+});
+
+// Slider istatistikleri
+router.get('/api/slider/stats', requireAuth, async (req, res) => {
+    try {
+        const images = await readSliderData();
+
+        let totalSize = 0;
+        const formats = {};
+        const dimensions = {};
+
+        images.forEach(img => {
+            totalSize += img.file_size || 0;
+
+            const ext = path.extname(img.filename).toLowerCase().substring(1);
+            formats[ext] = (formats[ext] || 0) + 1;
+
+            const dimension = `${img.width}x${img.height}`;
+            dimensions[dimension] = (dimensions[dimension] || 0) + 1;
+        });
+
+        res.json({
+            success: true,
+            data: {
+                total_images: images.length,
+                total_size: totalSize,
+                formats,
+                dimensions,
+                average_size: images.length > 0 ? Math.round(totalSize / images.length) : 0
+            }
+        });
+
+    } catch (error) {
+        console.error('Slider stats error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'İstatistikler alınırken hata oluştu'
+        });
+    }
+});
+
+// Public API - Frontend için slider resimlerini al
+router.get('/api/slider-images', async (req, res) => {
+    try {
+        const images = await readSliderData();
+
+        // Sort by order and return only filenames
+        const sortedImages = images
+            .sort((a, b) => (a.order || 0) - (b.order || 0))
+            .map(img => img.filename);
+
+        res.json({
+            success: true,
+            images: sortedImages
+        });
+
+    } catch (error) {
+        console.error('Public slider images error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Slider resimleri alınırken hata oluştu',
+            images: []
+        });
+    }
+});
+
+// Başlangıçta klasörleri ve veri dosyasını oluştur
+(async () => {
+    try {
+        await ensureSliderDir();
+        await ensureSliderDataFile();
+        console.log('Slider directories and data file initialized');
+    } catch (error) {
+        console.error('Error initializing slider system:', error);
+    }
+})();
+
+router.get('/categories', requireAuth, async (req, res) => {
+    try {
+        res.render('admin/categories', {
+            title: 'Kategori Yönetimi - Ark Stream Admin',
+            user: req.user
+        });
+    } catch (error) {
+        console.error('Categories page error:', error);
+        res.status(500).render('error', {
+            title: 'Error',
+            error: {
+                status: 500,
+                message: 'Kategori sayfası yüklenemedi'
+            }
+        });
+    }
+});
+
+// DataTable API for categories
+router.post('/api/categories', requireAuth, async (req, res) => {
+    try {
+        const { start = 0, length = 10, search = {}, order = [] } = req.body;
+
+        let whereCondition = {};
+        if (search && search.value && search.value.trim() !== '') {
+            const searchValue = `%${search.value.trim()}%`;
+            whereCondition = {
+                [Op.or]: [
+                    { name: { [Op.like]: searchValue } },
+                    { description: { [Op.like]: searchValue } }
+                ]
+            };
+        }
+
+        const orderConditions = [];
+        const columns = ['name', 'sort_order', 'is_active', 'created_at'];
+
+        if (order && order.length > 0) {
+            order.forEach(orderItem => {
+                const columnIndex = parseInt(orderItem.column);
+                const direction = orderItem.dir === 'desc' ? 'DESC' : 'ASC';
+                if (columns[columnIndex]) {
+                    orderConditions.push([columns[columnIndex], direction]);
+                }
+            });
+        } else {
+            orderConditions.push(['sort_order', 'ASC'], ['name', 'ASC']);
+        }
+
+        const totalRecords = await Category.count();
+        const filteredRecords = await Category.count({ where: whereCondition });
+
+        const categories = await Category.findAll({
+            where: whereCondition,
+            order: orderConditions,
+            offset: parseInt(start),
+            limit: parseInt(length),
+            include: [{
+                model: Stream,
+                as: 'streams',
+                attributes: [],
+                required: false
+            }],
+            attributes: [
+                'id', 'name', 'description', 'color', 'icon',
+                'sort_order', 'is_active', 'created_at', 'updated_at',
+                [require('sequelize').fn('COUNT', require('sequelize').col('streams.id')), 'stream_count']
+            ],
+            group: ['Category.id']
+        });
+
+        res.json({
+            draw: parseInt(req.body.draw) || 1,
+            recordsTotal: totalRecords,
+            recordsFiltered: filteredRecords,
+            data: categories
+        });
+    } catch (error) {
+        console.error('DataTable API error (categories):', error);
+        res.status(500).json({
+            error: 'Veri yüklenemedi',
+            draw: parseInt(req.body.draw) || 1,
+            recordsTotal: 0,
+            recordsFiltered: 0,
+            data: []
+        });
+    }
+});
+
+// Tek kategori getir
+router.get('/api/categories/:id', requireAuth, async (req, res) => {
+    try {
+        const category = await Category.findByPk(req.params.id, {
+            include: [{
+                model: Stream,
+                as: 'streams',
+                attributes: ['id', 'stream_name', 'status', 'is_active'],
+                required: false
+            }]
+        });
+
+        if (!category) {
+            return res.status(404).json({
+                success: false,
+                message: 'Kategori bulunamadı'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: category
+        });
+    } catch (error) {
+        console.error('Get category error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Kategori bilgileri alınamadı'
+        });
+    }
+});
+
+// Yeni kategori oluştur
+router.post('/api/categories/create', upload.none(), requireAuth, async (req, res) => {
+    try {
+        console.log('Create category request body:', req.body);
+
+        const { name, description, color, icon, sort_order, is_active } = req.body;
+
+        // Validasyon
+        if (!name || name.trim().length < 2) {
+            return res.status(400).json({
+                success: false,
+                message: 'Kategori adı en az 2 karakter olmalıdır'
+            });
+        }
+
+        // Aynı isimde kategori var mı kontrol et
+        const existingCategory = await Category.findOne({
+            where: { name: name.trim() }
+        });
+
+        if (existingCategory) {
+            return res.status(400).json({
+                success: false,
+                message: 'Bu isimde bir kategori zaten mevcut'
+            });
+        }
+
+        const category = await Category.create({
+            name: name.trim(),
+            description: description?.trim() || null,
+            color: color || '#007bff',
+            icon: icon || 'camera',
+            sort_order: sort_order ? parseInt(sort_order) : 0,
+            is_active: is_active === 'on' || is_active === true || is_active === '1' || is_active === 'true'
+        });
+
+        res.json({
+            success: true,
+            message: 'Kategori başarıyla oluşturuldu',
+            data: category
+        });
+    } catch (error) {
+        console.error('Category creation error:', error);
+
+        let errorMessage = 'Kategori oluşturulurken bir hata oluştu';
+        if (error.name === 'SequelizeUniqueConstraintError') {
+            errorMessage = 'Bu kategori adı zaten kullanılıyor';
+        } else if (error.name === 'SequelizeValidationError') {
+            errorMessage = error.errors.map(err => err.message).join(', ');
+        }
+
+        res.status(400).json({
+            success: false,
+            message: errorMessage
+        });
+    }
+});
+
+// Kategori güncelle
+router.put('/api/categories/:id', upload.none(), requireAuth, async (req, res) => {
+    try {
+        console.log('Update category request body:', req.body);
+
+        const categoryId = req.params.id;
+        const { name, description, color, icon, sort_order, is_active } = req.body;
+
+        const category = await Category.findByPk(categoryId);
+
+        if (!category) {
+            return res.status(404).json({
+                success: false,
+                message: 'Kategori bulunamadı'
+            });
+        }
+
+        // Eğer isim değiştiriliyorsa, aynı isimde başka kategori var mı kontrol et
+        if (name && name.trim() !== category.name) {
+            const existingCategory = await Category.findOne({
+                where: {
+                    name: name.trim(),
+                    id: { [Op.ne]: categoryId }
+                }
+            });
+
+            if (existingCategory) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Bu isimde bir kategori zaten mevcut'
+                });
+            }
+        }
+
+        await category.update({
+            name: name?.trim() || category.name,
+            description: description !== undefined ? (description?.trim() || null) : category.description,
+            color: color || category.color,
+            icon: icon || category.icon,
+            sort_order: sort_order !== undefined ? parseInt(sort_order) : category.sort_order,
+            is_active: is_active === 'on' || is_active === true || is_active === '1' || is_active === 'true'
+        });
+
+        res.json({
+            success: true,
+            message: 'Kategori başarıyla güncellendi',
+            data: category
+        });
+    } catch (error) {
+        console.error('Category update error:', error);
+
+        let errorMessage = 'Kategori güncellenirken bir hata oluştu';
+        if (error.name === 'SequelizeUniqueConstraintError') {
+            errorMessage = 'Bu kategori adı başka bir kategori tarafından kullanılıyor';
+        } else if (error.name === 'SequelizeValidationError') {
+            errorMessage = error.errors.map(err => err.message).join(', ');
+        }
+
+        res.status(400).json({
+            success: false,
+            message: errorMessage
+        });
+    }
+});
+
+// Kategori sil
+router.delete('/api/categories/:id', requireAuth, async (req, res) => {
+    try {
+        const categoryId = req.params.id;
+        const { force = false } = req.query; // ?force=true ile zorunlu silme
+
+        const category = await Category.findByPk(categoryId);
+
+        if (!category) {
+            return res.status(404).json({
+                success: false,
+                message: 'Kategori bulunamadı'
+            });
+        }
+
+        // Kategoriye bağlı stream var mı kontrol et
+        const streamCount = await StreamCategory.count({
+            where: { category_id: categoryId }
+        });
+
+        if (streamCount > 0 && !force) {
+            return res.status(400).json({
+                success: false,
+                message: `Bu kategoride ${streamCount} yayın bulunmaktadır. Önce yayınları başka kategorilere taşıyın veya silin.`,
+                data: {
+                    streamCount,
+                    forceDeleteUrl: `/admin/api/categories/${categoryId}?force=true`
+                }
+            });
+        }
+
+        // Zorunlu silme durumunda, bağlı stream ilişkilerini sil
+        if (force && streamCount > 0) {
+            await StreamCategory.destroy({
+                where: { category_id: categoryId }
+            });
+        }
+
+        await category.destroy();
+
+        res.json({
+            success: true,
+            message: 'Kategori başarıyla silindi',
+            data: {
+                deletedCategory: category.name,
+                removedRelations: force ? streamCount : 0
+            }
+        });
+    } catch (error) {
+        console.error('Category deletion error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Kategori silinemedi'
+        });
+    }
+});
+
+// Kategori sıralamasını güncelle
+router.post('/api/categories/reorder', upload.none(), requireAuth, async (req, res) => {
+    try {
+        const { categories } = req.body; // [{ id, sort_order }, ...]
+
+        if (!Array.isArray(categories)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Kategoriler array formatında olmalıdır'
+            });
+        }
+
+        const updatePromises = categories.map(cat =>
+            Category.update(
+                { sort_order: parseInt(cat.sort_order) },
+                { where: { id: cat.id } }
+            )
+        );
+
+        await Promise.all(updatePromises);
+
+        res.json({
+            success: true,
+            message: 'Kategori sıralaması güncellendi'
+        });
+    } catch (error) {
+        console.error('Reorder categories error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Kategori sıralaması güncellenemedi'
+        });
+    }
+});
+
+// ============================================
+// STREAM-CATEGORY RELATION ENDPOINTS
+// ============================================
+
+// Stream'e kategori ekle
+router.post('/api/streams/:streamId/categories/:categoryId', requireAuth, async (req, res) => {
+    try {
+        const { streamId, categoryId } = req.params;
+
+        // Stream ve kategori var mı kontrol et
+        const stream = await Stream.findByPk(streamId);
+        const category = await Category.findByPk(categoryId);
+
+        if (!stream) {
+            return res.status(404).json({
+                success: false,
+                message: 'Yayın bulunamadı'
+            });
+        }
+
+        if (!category) {
+            return res.status(404).json({
+                success: false,
+                message: 'Kategori bulunamadı'
+            });
+        }
+
+        // İlişki zaten var mı kontrol et
+        const existingRelation = await StreamCategory.findOne({
+            where: { stream_id: streamId, category_id: categoryId }
+        });
+
+        if (existingRelation) {
+            return res.status(400).json({
+                success: false,
+                message: 'Bu yayın zaten bu kategoride mevcut'
+            });
+        }
+
+        // İlişki oluştur
+        await StreamCategory.create({
+            stream_id: streamId,
+            category_id: categoryId
+        });
+
+        res.json({
+            success: true,
+            message: 'Yayın kategoriye başarıyla eklendi'
+        });
+
+    } catch (error) {
+        console.error('Add stream to category error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Yayın kategoriye eklenirken hata oluştu'
+        });
+    }
+});
+
+// Stream'den kategori çıkar
+router.delete('/api/streams/:streamId/categories/:categoryId', requireAuth, async (req, res) => {
+    try {
+        const { streamId, categoryId } = req.params;
+
+        const deleted = await StreamCategory.destroy({
+            where: {
+                stream_id: streamId,
+                category_id: categoryId
+            }
+        });
+
+        if (deleted === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Bu yayın zaten bu kategoride değil'
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'Yayın kategoriden başarıyla çıkarıldı'
+        });
+
+    } catch (error) {
+        console.error('Remove stream from category error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Yayın kategoriden çıkarılırken hata oluştu'
+        });
+    }
+});
+
+// Stream'in kategorilerini toplu güncelle
+router.put('/api/streams/:streamId/categories', upload.none(), requireAuth, async (req, res) => {
+    try {
+        const { streamId } = req.params;
+        const { category_ids } = req.body; // Array of category IDs
+
+        const stream = await Stream.findByPk(streamId);
+        if (!stream) {
+            return res.status(404).json({
+                success: false,
+                message: 'Yayın bulunamadı'
+            });
+        }
+
+        // Mevcut ilişkileri sil
+        await StreamCategory.destroy({
+            where: { stream_id: streamId }
+        });
+
+        // Yeni kategoriler varsa ekle
+        if (category_ids && Array.isArray(category_ids) && category_ids.length > 0) {
+            // Kategorilerin var olduğunu kontrol et
+            const existingCategories = await Category.findAll({
+                where: { id: category_ids },
+                attributes: ['id']
+            });
+
+            const existingCategoryIds = existingCategories.map(cat => cat.id);
+
+            // Mevcut kategoriler için ilişki oluştur
+            const streamCategories = existingCategoryIds.map(categoryId => ({
+                stream_id: streamId,
+                category_id: categoryId
+            }));
+
+            if (streamCategories.length > 0) {
+                await StreamCategory.bulkCreate(streamCategories);
+            }
+        }
+
+        res.json({
+            success: true,
+            message: 'Yayın kategorileri başarıyla güncellendi',
+            data: {
+                updated_categories: category_ids || []
+            }
+        });
+
+    } catch (error) {
+        console.error('Update stream categories error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Yayın kategorileri güncellenirken hata oluştu'
+        });
+    }
+});
+
+// Stream'in kategorilerini getir
+router.get('/api/streams/:streamId/categories', requireAuth, async (req, res) => {
+    try {
+        const { streamId } = req.params;
+
+        const stream = await Stream.findByPk(streamId, {
+            include: [{
+                model: Category,
+                as: 'categories',
+                attributes: ['id', 'name', 'color', 'icon']
+            }]
+        });
+
+        if (!stream) {
+            return res.status(404).json({
+                success: false,
+                message: 'Yayın bulunamadı'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: {
+                stream_id: streamId,
+                stream_name: stream.stream_name,
+                categories: stream.categories || []
+            }
+        });
+
+    } catch (error) {
+        console.error('Get stream categories error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Yayın kategorileri alınırken hata oluştu'
+        });
+    }
+});
+
+// Aktif kategoriler listesi (Stream oluştururken kullanmak için)
+router.get('/api/categories/list', requireAuth, async (req, res) => {
+    try {
+        const categories = await Category.findAll({
+            where: { is_active: true },
+            attributes: ['id', 'name', 'color', 'icon'],
+            order: [['sort_order', 'ASC'], ['name', 'ASC']]
+        });
+
+        res.json({
+            success: true,
+            data: categories
+        });
+    } catch (error) {
+        console.error('Category list error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Kategori listesi alınamadı'
+        });
+    }
+});
+
+// Kategori istatistikleri
+router.get('/api/category-stats', requireAuth, async (req, res) => {
+    try {
+        const totalCategories = await Category.count();
+        const activeCategories = await Category.count({ where: { is_active: true } });
+
+        // Her kategori için stream sayısı
+        const categoryStreamCounts = await Category.findAll({
+            include: [{
+                model: Stream,
+                as: 'streams',
+                attributes: [],
+                where: { is_active: true },
+                required: false
+            }],
+            attributes: [
+                'id', 'name', 'color',
+                [require('sequelize').fn('COUNT', require('sequelize').col('streams.id')), 'stream_count']
+            ],
+            group: ['Category.id'],
+            order: [['sort_order', 'ASC']]
+        });
+
+        // Kategorisiz streamler
+        const totalStreams = await Stream.count({ where: { is_active: true } });
+        const categorizedStreams = await StreamCategory.count({
+            include: [{
+                model: Stream,
+                where: { is_active: true }
+            }]
+        });
+        const uncategorizedStreams = totalStreams - categorizedStreams;
+
+        res.json({
+            success: true,
+            data: {
+                totalCategories,
+                activeCategories,
+                inactiveCategories: totalCategories - activeCategories,
+                totalStreams,
+                categorizedStreams,
+                uncategorizedStreams,
+                categoryStreamCounts: categoryStreamCounts.map(cat => ({
+                    id: cat.id,
+                    name: cat.name,
+                    color: cat.color,
+                    streamCount: parseInt(cat.getDataValue('stream_count')) || 0
+                }))
+            }
+        });
+    } catch (error) {
+        console.error('Category stats API error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Kategori istatistikleri alınamadı'
         });
     }
 });

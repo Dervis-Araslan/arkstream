@@ -5,7 +5,7 @@
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",
-    "dev": "nodemon src/app.js"
+    "dev": "nodemon --ignore public/assets/slider --ignore src/data/slider-images.json src/app.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -17,7 +17,8 @@
     "glob": "^11.0.3",
     "multer": "^1.4.4",
     "mysql2": "^3.14.3",
-    "sequelize": "^6.37.7"
+    "sequelize": "^6.37.7",
+    "sharp": "^0.34.3"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"

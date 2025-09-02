@@ -45,6 +45,9 @@ app.get('/api/health', (req, res) => {
     });
 });
 
+const apiRoutes = require('./routers/api');
+app.use('/api', apiRoutes);
+
 app.get('/api/stats', async (req, res) => {
     try {
         const totalUsers = await User.count();
@@ -155,7 +158,7 @@ async function recoverStreams() {
                         last_started: new Date(),
                         process_id: result.pid,
                         error_message: null,
-                        hls_url: `${SERVER_HOST}/static/${stream.stream_name}.m3u8`
+                        hls_url: `${SERVER_HOST}/static/stream/${stream.stream_name}.m3u8`
                     });
 
                     console.log(`✅ Stream ${stream.stream_name} auto-restarted successfully (PID: ${result.pid})`);
@@ -263,7 +266,6 @@ app.use('*', (req, res) => {
     <a href="/">← Back to Home</a>
   `);
 });
-
 // Error handler
 app.use((error, req, res, next) => {
     console.error('Error:', error);
@@ -288,11 +290,11 @@ async function startServer() {
         await createDefaultAdmin();
 
         app.listen(PORT, () => {
-            console.log(`\n🚀 Ark Stream Server running on http://${SERVER_HOST}`);
-            console.log(`📊 Admin Panel: http://${SERVER_HOST}/admin`);
-            console.log(`🎥 Main Dashboard: http://${SERVER_HOST}`);
-            console.log(`📡 API Health: http://${SERVER_HOST}/api/health`);
-            console.log(`📈 API Stats: http://${SERVER_HOST}/api/stats\n`);
+            console.log(`\n🚀 Ark Stream Server running on ${SERVER_HOST}`);
+            console.log(`📊 Admin Panel: ${SERVER_HOST}/admin`);
+            console.log(`🎥 Main Dashboard: ${SERVER_HOST}`);
+            console.log(`📡 API Health: ${SERVER_HOST}/api/health`);
+            console.log(`📈 API Stats: ${SERVER_HOST}/api/stats\n`);
 
             // Run stream recovery after 3 seconds (ensure database is ready)
             setTimeout(recoverStreams, 3000);

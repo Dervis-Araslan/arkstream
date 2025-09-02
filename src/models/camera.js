@@ -48,7 +48,64 @@ const Camera = sequelize.define('Camera', {
     updatedAt: 'updated_at'
 });
 
-// Stream Model - Yayın bilgileri
+// Category Model - Kategori bilgileri
+const Category = sequelize.define('Category', {
+    id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true
+    },
+    name: {
+        type: DataTypes.STRING(100),
+        allowNull: false,
+        unique: true,
+        validate: {
+            len: [2, 100],
+            notEmpty: true
+        }
+    },
+    description: {
+        type: DataTypes.TEXT,
+        allowNull: true
+    },
+    color: {
+        type: DataTypes.STRING(7), // #FFFFFF formatı için
+        allowNull: true,
+        defaultValue: '#007bff',
+        validate: {
+            is: /^#[0-9A-F]{6}$/i
+        }
+    },
+    icon: {
+        type: DataTypes.STRING(50),
+        allowNull: true,
+        defaultValue: 'camera'
+    },
+    sort_order: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0
+    },
+    is_active: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: true
+    }
+}, {
+    tableName: 'categories',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at',
+    indexes: [
+        {
+            fields: ['sort_order']
+        },
+        {
+            fields: ['is_active']
+        }
+    ]
+});
+
+// Stream Model - Yayın bilgileri (kategori kaldırıldı)
 const Stream = sequelize.define('Stream', {
     id: {
         type: DataTypes.UUID,
@@ -192,6 +249,49 @@ const Stream = sequelize.define('Stream', {
     ]
 });
 
+// Stream-Category Many-to-Many ilişkisi için ara tablo
+const StreamCategory = sequelize.define('StreamCategory', {
+    id: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4,
+        primaryKey: true
+    },
+    stream_id: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        references: {
+            model: Stream,
+            key: 'id'
+        }
+    },
+    category_id: {
+        type: DataTypes.UUID,
+        allowNull: false,
+        references: {
+            model: Category,
+            key: 'id'
+        }
+    }
+}, {
+    tableName: 'stream_categories',
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at',
+    indexes: [
+        {
+            fields: ['stream_id']
+        },
+        {
+            fields: ['category_id']
+        },
+        {
+            // Unique constraint - bir stream bir kategoriye sadece bir kez eklenebilir
+            unique: true,
+            fields: ['stream_id', 'category_id']
+        }
+    ]
+});
+
 // İlişkiler
 Camera.hasMany(Stream, {
     foreignKey: 'camera_id',
@@ -203,8 +303,28 @@ Stream.belongsTo(Camera, {
     as: 'camera'
 });
 
+// Many-to-Many ilişkiler
+Stream.belongsToMany(Category, {
+    through: StreamCategory,
+    foreignKey: 'stream_id',
+    otherKey: 'category_id',
+    as: 'categories'
+});
+
+Category.belongsToMany(Stream, {
+    through: StreamCategory,
+    foreignKey: 'category_id',
+    otherKey: 'stream_id',
+    as: 'streams'
+});
+
 // Instance methods
 Camera.prototype.toJSON = function () {
+    const values = Object.assign({}, this.get());
+    return values;
+};
+
+Category.prototype.toJSON = function () {
     const values = Object.assign({}, this.get());
     return values;
 };
@@ -256,8 +376,76 @@ Stream.getActiveStreams = async function () {
         include: [{
             model: Camera,
             as: 'camera'
+        }, {
+            model: Category,
+            as: 'categories'
         }]
     });
 };
 
-module.exports = { Camera, Stream };
+Category.getWithStreamCounts = async function () {
+    return await this.findAll({
+        where: { is_active: true },
+        include: [{
+            model: Stream,
+            as: 'streams',
+            attributes: [],
+            where: { is_active: true },
+            required: false
+        }],
+        attributes: [
+            'id', 'name', 'description', 'color', 'icon', 'sort_order',
+            [sequelize.fn('COUNT', sequelize.col('streams.id')), 'stream_count']
+        ],
+        group: ['Category.id'],
+        order: [['sort_order', 'ASC']]
+    });
+};
+
+// Stream'e kategori ekleme metodu
+Stream.prototype.addToCategory = async function (categoryId) {
+    try {
+        await StreamCategory.create({
+            stream_id: this.id,
+            category_id: categoryId
+        });
+        return true;
+    } catch (error) {
+        if (error.name === 'SequelizeUniqueConstraintError') {
+            // Zaten bu kategoride
+            return false;
+        }
+        throw error;
+    }
+};
+
+// Stream'den kategori çıkarma metodu
+Stream.prototype.removeFromCategory = async function (categoryId) {
+    const deleted = await StreamCategory.destroy({
+        where: {
+            stream_id: this.id,
+            category_id: categoryId
+        }
+    });
+    return deleted > 0;
+};
+
+// Stream'in kategorilerini güncelleme metodu
+Stream.prototype.updateCategories = async function (categoryIds) {
+    // Mevcut kategorileri sil
+    await StreamCategory.destroy({
+        where: { stream_id: this.id }
+    });
+
+    // Yeni kategorileri ekle
+    if (categoryIds && categoryIds.length > 0) {
+        const streamCategories = categoryIds.map(categoryId => ({
+            stream_id: this.id,
+            category_id: categoryId
+        }));
+
+        await StreamCategory.bulkCreate(streamCategories);
+    }
+};
+
+module.exports = { Camera, Stream, Category, StreamCategory };

@@ -2,6 +2,9 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const { User } = require('../models');
 const { requireAuth, checkPermission } = require('../middleware/auth');
+const path = require('path'); // Bu satırı ekle
+const fs = require('fs'); // Bu satırı ekle
+const { Op } = require('sequelize'); // Bu da eksik
 
 const router = express.Router();
 
@@ -441,6 +444,34 @@ router.get('/users/search/:query', requireAuth, checkPermission('manage_users'),
         res.status(500).json({
             success: false,
             message: 'Unable to search users'
+        });
+    }
+});
+
+router.get('/slider-images', async (req, res) => {
+    try {
+        const sliderPath = path.join(__dirname, '../../public/assets/slider');
+
+        // Klasör yoksa oluştur
+        if (!fs.existsSync(sliderPath)) {
+            fs.mkdirSync(sliderPath, { recursive: true });
+        }
+
+        // Resim dosyalarını oku
+        const files = fs.readdirSync(sliderPath);
+        const imageFiles = files.filter(file =>
+            /\.(jpg|jpeg|png|gif|webp)$/i.test(file)
+        );
+
+        res.json({
+            success: true,
+            images: imageFiles
+        });
+    } catch (error) {
+        console.error('Slider images error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
         });
     }
 });
