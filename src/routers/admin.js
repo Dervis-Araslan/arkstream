@@ -5,7 +5,7 @@ const { requireAuth, requireAdmin, loadUser } = require('../middleware/auth');
 const { Op } = require('sequelize');
 const os = require('os');
 const multer = require('multer'); // Form data için gerekli
-const { User, Camera, Stream, Category } = require('../models');
+const { User, Camera, Stream, Category, StreamCategory } = require('../models');
 const fs = require('fs').promises;
 const path = require('path');
 const sharp = require('sharp');
@@ -1945,30 +1945,47 @@ router.post('/api/categories', requireAuth, async (req, res) => {
         const totalRecords = await Category.count();
         const filteredRecords = await Category.count({ where: whereCondition });
 
+        // FIXED: Use a simpler approach with two separate queries
         const categories = await Category.findAll({
             where: whereCondition,
             order: orderConditions,
             offset: parseInt(start),
-            limit: parseInt(length),
-            include: [{
-                model: Stream,
-                as: 'streams',
-                attributes: [],
-                required: false
-            }],
+            limit: parseInt(length)
+        });
+
+        // Get stream counts for these specific categories
+        const categoryIds = categories.map(cat => cat.id);
+
+        const streamCounts = await StreamCategory.findAll({
+            where: {
+                category_id: categoryIds
+            },
             attributes: [
-                'id', 'name', 'description', 'color', 'icon',
-                'sort_order', 'is_active', 'created_at', 'updated_at',
-                [require('sequelize').fn('COUNT', require('sequelize').col('streams.id')), 'stream_count']
+                'category_id',
+                [require('sequelize').fn('COUNT', require('sequelize').col('category_id')), 'stream_count']
             ],
-            group: ['Category.id']
+            group: ['category_id'],
+            raw: true
+        });
+
+        // Create a map for easy lookup
+        const streamCountMap = {};
+        streamCounts.forEach(item => {
+            streamCountMap[item.category_id] = parseInt(item.stream_count) || 0;
+        });
+
+        // Add stream counts to categories
+        const categoriesWithCounts = categories.map(category => {
+            const categoryData = category.toJSON();
+            categoryData.stream_count = streamCountMap[category.id] || 0;
+            return categoryData;
         });
 
         res.json({
             draw: parseInt(req.body.draw) || 1,
             recordsTotal: totalRecords,
             recordsFiltered: filteredRecords,
-            data: categories
+            data: categoriesWithCounts
         });
     } catch (error) {
         console.error('DataTable API error (categories):', error);
@@ -1981,6 +1998,90 @@ router.post('/api/categories', requireAuth, async (req, res) => {
         });
     }
 });
+
+// Aktif kategoriler listesi (Stream oluştururken kullanmak için)
+router.get('/api/categories/list', requireAuth, async (req, res) => {
+    try {
+        const categories = await Category.findAll({
+            where: { is_active: true },
+            attributes: ['id', 'name', 'color', 'icon'],
+            order: [['sort_order', 'ASC'], ['name', 'ASC']]
+        });
+
+        console.log('Categories found:', categories.length); // Debug log
+
+        res.json({
+            success: true,
+            data: categories
+        });
+    } catch (error) {
+        console.error('Category list error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Kategori listesi alınamadı'
+        });
+    }
+});
+
+// Kategori istatistikleri
+router.get('/api/category-stats', requireAuth, async (req, res) => {
+    try {
+        const totalCategories = await Category.count();
+        const activeCategories = await Category.count({ where: { is_active: true } });
+
+        // Her kategori için stream sayısı
+        const categoryStreamCounts = await Category.findAll({
+            include: [{
+                model: Stream,
+                as: 'streams',
+                attributes: [],
+                where: { is_active: true },
+                required: false
+            }],
+            attributes: [
+                'id', 'name', 'color',
+                [require('sequelize').fn('COUNT', require('sequelize').col('streams.id')), 'stream_count']
+            ],
+            group: ['Category.id'],
+            order: [['sort_order', 'ASC']]
+        });
+
+        // Kategorisiz streamler
+        const totalStreams = await Stream.count({ where: { is_active: true } });
+        const categorizedStreams = await StreamCategory.count({
+            include: [{
+                model: Stream,
+                where: { is_active: true }
+            }]
+        });
+        const uncategorizedStreams = totalStreams - categorizedStreams;
+
+        res.json({
+            success: true,
+            data: {
+                totalCategories,
+                activeCategories,
+                inactiveCategories: totalCategories - activeCategories,
+                totalStreams,
+                categorizedStreams,
+                uncategorizedStreams,
+                categoryStreamCounts: categoryStreamCounts.map(cat => ({
+                    id: cat.id,
+                    name: cat.name,
+                    color: cat.color,
+                    streamCount: parseInt(cat.getDataValue('stream_count')) || 0
+                }))
+            }
+        });
+    } catch (error) {
+        console.error('Category stats API error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Kategori istatistikleri alınamadı'
+        });
+    }
+});
+
 
 // Tek kategori getir
 router.get('/api/categories/:id', requireAuth, async (req, res) => {
@@ -2415,85 +2516,6 @@ router.get('/api/streams/:streamId/categories', requireAuth, async (req, res) =>
     }
 });
 
-// Aktif kategoriler listesi (Stream oluştururken kullanmak için)
-router.get('/api/categories/list', requireAuth, async (req, res) => {
-    try {
-        const categories = await Category.findAll({
-            where: { is_active: true },
-            attributes: ['id', 'name', 'color', 'icon'],
-            order: [['sort_order', 'ASC'], ['name', 'ASC']]
-        });
 
-        res.json({
-            success: true,
-            data: categories
-        });
-    } catch (error) {
-        console.error('Category list error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Kategori listesi alınamadı'
-        });
-    }
-});
-
-// Kategori istatistikleri
-router.get('/api/category-stats', requireAuth, async (req, res) => {
-    try {
-        const totalCategories = await Category.count();
-        const activeCategories = await Category.count({ where: { is_active: true } });
-
-        // Her kategori için stream sayısı
-        const categoryStreamCounts = await Category.findAll({
-            include: [{
-                model: Stream,
-                as: 'streams',
-                attributes: [],
-                where: { is_active: true },
-                required: false
-            }],
-            attributes: [
-                'id', 'name', 'color',
-                [require('sequelize').fn('COUNT', require('sequelize').col('streams.id')), 'stream_count']
-            ],
-            group: ['Category.id'],
-            order: [['sort_order', 'ASC']]
-        });
-
-        // Kategorisiz streamler
-        const totalStreams = await Stream.count({ where: { is_active: true } });
-        const categorizedStreams = await StreamCategory.count({
-            include: [{
-                model: Stream,
-                where: { is_active: true }
-            }]
-        });
-        const uncategorizedStreams = totalStreams - categorizedStreams;
-
-        res.json({
-            success: true,
-            data: {
-                totalCategories,
-                activeCategories,
-                inactiveCategories: totalCategories - activeCategories,
-                totalStreams,
-                categorizedStreams,
-                uncategorizedStreams,
-                categoryStreamCounts: categoryStreamCounts.map(cat => ({
-                    id: cat.id,
-                    name: cat.name,
-                    color: cat.color,
-                    streamCount: parseInt(cat.getDataValue('stream_count')) || 0
-                }))
-            }
-        });
-    } catch (error) {
-        console.error('Category stats API error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Kategori istatistikleri alınamadı'
-        });
-    }
-});
 
 module.exports = router;

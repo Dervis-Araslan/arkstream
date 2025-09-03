@@ -398,7 +398,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 40px;
+            margin-bottom: 30px;
             padding: 30px 40px;
             background: var(--glass-bg);
             backdrop-filter: blur(20px);
@@ -432,6 +432,120 @@
             color: var(--primary-navy);
             transform: translateY(-2px) scale(1.05);
             box-shadow: 0 8px 25px rgba(192, 197, 206, 0.4);
+        }
+
+        /* Category Navigation - İyileştirilmiş Düzen */
+        .category-nav {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            margin-bottom: 40px;
+            padding: 25px 30px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            border-radius: 16px;
+            border: 1px solid var(--glass-border);
+            box-shadow: 0 8px 32px rgba(10, 22, 40, 0.4);
+        }
+
+        .category-nav h3 {
+            color: var(--text-light);
+            font-size: 1.2rem;
+            margin: 0;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-bottom: 2px solid rgba(248, 249, 250, 0.1);
+            padding-bottom: 12px;
+        }
+
+        #categoryFilters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .category-filter {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 18px;
+            border-radius: 25px;
+            background: rgba(26, 35, 50, 0.8);
+            border: 2px solid rgba(248, 249, 250, 0.1);
+            color: var(--text-light);
+            cursor: pointer;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            font-weight: 600;
+            font-size: 0.95rem;
+            position: relative;
+            overflow: hidden;
+            white-space: nowrap;
+            min-width: fit-content;
+            box-shadow: 0 4px 15px rgba(10, 22, 40, 0.3);
+        }
+
+        .category-filter::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+            transition: left 0.6s ease;
+        }
+
+        .category-filter:hover::before {
+            left: 100%;
+        }
+
+        .category-filter:hover {
+            border-color: var(--gold-accent);
+            transform: translateY(-3px) scale(1.05);
+            box-shadow: 0 8px 25px rgba(192, 197, 206, 0.25);
+            background: rgba(26, 35, 50, 0.95);
+        }
+
+        .category-filter.active {
+            background: linear-gradient(45deg, #c41e3a, #a01729);
+            border-color: rgba(196, 30, 58, 0.7);
+            box-shadow: 0 8px 25px rgba(196, 30, 58, 0.4);
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        .category-filter.active:hover {
+            transform: translateY(-3px) scale(1.05);
+            box-shadow: 0 12px 30px rgba(196, 30, 58, 0.5);
+        }
+
+        .category-icon {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+        }
+
+        .category-count {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 4px 10px;
+            border-radius: 15px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            min-width: 24px;
+            text-align: center;
+            line-height: 1;
+        }
+
+        .category-filter.active .category-count {
+            background: rgba(255, 255, 255, 0.3);
         }
 
         /* Loading Spinner */
@@ -645,6 +759,23 @@
             display: flex;
             align-items: center;
             gap: 6px;
+        }
+
+        .camera-categories {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        .camera-category-badge {
+            font-size: 0.75rem;
+            padding: 4px 10px;
+            border-radius: 12px;
+            color: white;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
         .camera-actions {
@@ -872,6 +1003,18 @@
                 font-size: 1.8rem;
             }
 
+            .category-nav {
+                padding: 20px;
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+
+            .category-nav h3 {
+                margin-right: 0;
+                margin-bottom: 10px;
+            }
+
             .camera-grid {
                 grid-template-columns: 1fr;
                 gap: 20px;
@@ -921,6 +1064,24 @@
 
         ::-webkit-scrollbar-thumb:hover {
             background: #b8941f;
+        }
+
+        /* Empty category state */
+        .empty-category-state {
+            text-align: center;
+            padding: 80px 20px;
+            color: var(--text-muted);
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            border-radius: 16px;
+            border: 1px solid var(--glass-border);
+            margin: 40px 0;
+        }
+
+        .empty-category-state i {
+            font-size: 4rem;
+            margin-bottom: 25px;
+            opacity: 0.6;
         }
     </style>
 </head>
@@ -984,6 +1145,14 @@
                 </button>
             </div>
 
+            <!-- Category Navigation -->
+            <div class="category-nav" id="categoryNav">
+                <h3><i class="fas fa-filter"></i> Kategoriler:</h3>
+                <div id="categoryFilters">
+                    <!-- Categories will be loaded here -->
+                </div>
+            </div>
+
             <!-- Loading State -->
             <div class="loading-state" id="loadingState">
                 <div class="loading-spinner"></div>
@@ -1000,6 +1169,13 @@
                     <i class="fas fa-sync-alt"></i>
                     Tekrar Dene
                 </button>
+            </div>
+
+            <!-- Empty Category State -->
+            <div class="empty-category-state" id="emptyCategoryState" style="display: none;">
+                <i class="fas fa-video-slash"></i>
+                <h3>Bu kategoride aktif yayın bulunamadı</h3>
+                <p>Seçilen kategoride şu anda canlı yayın yapan kamera bulunmuyor.</p>
             </div>
 
             <!-- Camera Grid -->
@@ -1024,15 +1200,24 @@
 
     <script>
         let cameras = [];
+        let categories = [];
         let viewerCounts = {};
         let currentHls = null;
         let activeVideos = {};
         let maxConcurrentStreams = 5;
+        let selectedCategoryId = null; // null = "Tümü"
 
         // Slider variables
         let sliderImages = [];
         let currentSlide = 0;
         let sliderInterval = null;
+
+        // Icon mapping for categories
+        const iconMap = {
+            'camera': '📷', 'video': '🎥', 'broadcast': '📡', 'security': '🔒',
+            'outdoor': '🌳', 'indoor': '🏠', 'traffic': '🚗', 'office': '🏢',
+            'home': '🏡', 'public': '🏛️', 'sport': '⚽', 'event': '🎪'
+        };
 
         // Smooth scroll to content with improved animation
         function scrollToContent() {
@@ -1040,7 +1225,7 @@
             const startPosition = window.pageYOffset;
             const targetPosition = contentSection.offsetTop;
             const distance = targetPosition - startPosition;
-            const duration = 1200; // Increased duration for smoother effect
+            const duration = 1200;
             let start = null;
 
             function animation(currentTime) {
@@ -1086,33 +1271,26 @@
             const prevBtn = document.querySelector('.slider-prev');
             const nextBtn = document.querySelector('.slider-next');
 
-            // Hide loading
             sliderLoading.style.display = 'none';
-
-            // Create slides
             slider.innerHTML = '';
             sliderNav.innerHTML = '';
 
             sliderImages.forEach((image, index) => {
-                // Create slide
                 const slide = document.createElement('div');
                 slide.className = `slide ${index === 0 ? 'active' : ''}`;
                 slide.innerHTML = `<img src="/static/assets/slider/${image}" alt="Slide ${index + 1}" loading="lazy">`;
                 slider.appendChild(slide);
 
-                // Create navigation dot
                 const dot = document.createElement('div');
                 dot.className = `slider-dot ${index === 0 ? 'active' : ''}`;
                 dot.onclick = () => goToSlide(index);
                 sliderNav.appendChild(dot);
             });
 
-            // Show navigation elements
             sliderNav.style.display = 'flex';
             prevBtn.style.display = 'flex';
             nextBtn.style.display = 'flex';
 
-            // Start auto-slide
             startSliderAutoplay();
         }
 
@@ -1146,7 +1324,6 @@
 
         function startSliderAutoplay() {
             if (sliderInterval) clearInterval(sliderInterval);
-
             sliderInterval = setInterval(() => {
                 nextSlide();
             }, 5000);
@@ -1159,24 +1336,116 @@
             }
         }
 
+        // Category functions
+        async function fetchCategories() {
+            try {
+                const response = await fetch('/api/categories/public');
+                const result = await response.json();
+
+                console.log('Categories API Response:', result);
+
+                if (result.success) {
+                    categories = result.data;
+                    console.log('Loaded categories:', categories);
+                    loadCategoryFilters();
+                } else {
+                    console.error('Categories loading failed:', result.message);
+                }
+            } catch (error) {
+                console.error('Categories fetch error:', error);
+            }
+        }
+
+        function loadCategoryFilters() {
+            const filtersContainer = document.getElementById('categoryFilters');
+            filtersContainer.innerHTML = '';
+
+            // "Tümü" filtresi
+            const allFilter = document.createElement('div');
+            allFilter.className = `category-filter ${selectedCategoryId === null ? 'active' : ''}`;
+            allFilter.onclick = () => filterByCategory(null);
+            allFilter.innerHTML = `
+                <i class="fas fa-th-large"></i>
+                <span>Tümü</span>
+                <span class="category-count">${cameras.length}</span>
+            `;
+            filtersContainer.appendChild(allFilter);
+
+            // Kategori filtreleri
+            categories.forEach(category => {
+                const categoryStreams = cameras.filter(camera =>
+                    camera.categories && camera.categories.some(cat => cat.id === category.id)
+                );
+
+                const filter = document.createElement('div');
+                filter.className = `category-filter ${selectedCategoryId === category.id ? 'active' : ''}`;
+                filter.onclick = () => filterByCategory(category.id);
+                filter.innerHTML = `
+                    <span class="category-icon" style="background-color: ${category.color}"></span>
+                    <span>${iconMap[category.icon] || '📷'} ${category.name}</span>
+                    <span class="category-count">${categoryStreams.length}</span>
+                `;
+                filtersContainer.appendChild(filter);
+            });
+        }
+
+        function filterByCategory(categoryId) {
+            selectedCategoryId = categoryId;
+            updateCategoryFilters();
+            loadCameras();
+        }
+
+        function updateCategoryFilters() {
+            document.querySelectorAll('.category-filter').forEach(filter => {
+                filter.classList.remove('active');
+            });
+
+            // Seçilen kategoriyi işaretle
+            const filters = document.querySelectorAll('.category-filter');
+            if (selectedCategoryId === null) {
+                filters[0].classList.add('active'); // "Tümü" filtresi
+            } else {
+                const selectedFilter = Array.from(filters).find(filter => {
+                    return filter.onclick.toString().includes(`filterByCategory(${selectedCategoryId})`);
+                });
+                if (selectedFilter) {
+                    selectedFilter.classList.add('active');
+                }
+            }
+        }
+
         // API'den yayınları yükle
         async function fetchStreams() {
             try {
                 showLoadingState();
 
-                const response = await fetch('/api/streams/public');
-                const result = await response.json();
+                // Kategorileri ve stream'leri paralel yükle
+                const [streamsResponse, categoriesResponse] = await Promise.all([
+                    fetch('/api/streams/public'),
+                    fetch('/api/categories/public')
+                ]);
 
-                console.log('API Response:', result);
+                const streamsResult = await streamsResponse.json();
+                const categoriesResult = await categoriesResponse.json();
 
-                if (result.success) {
-                    cameras = result.data;
+                console.log('Streams API Response:', streamsResult);
+                console.log('Categories API Response:', categoriesResult);
+
+                if (streamsResult.success && categoriesResult.success) {
+                    cameras = streamsResult.data;
+                    categories = categoriesResult.data;
+
                     console.log('Loaded cameras:', cameras);
+                    console.log('Loaded categories:', categories);
 
                     hideLoadingState();
+                    loadCategoryFilters();
                     loadCameras();
                 } else {
-                    console.error('Stream loading failed:', result.message);
+                    console.error('Loading failed:', {
+                        streams: streamsResult.message,
+                        categories: categoriesResult.message
+                    });
                     showErrorState();
                 }
             } catch (error) {
@@ -1188,18 +1457,26 @@
         function showLoadingState() {
             document.getElementById('loadingState').style.display = 'block';
             document.getElementById('errorState').style.display = 'none';
+            document.getElementById('emptyCategoryState').style.display = 'none';
             document.getElementById('cameraGrid').style.display = 'none';
         }
 
         function hideLoadingState() {
             document.getElementById('loadingState').style.display = 'none';
             document.getElementById('errorState').style.display = 'none';
-            document.getElementById('cameraGrid').style.display = 'grid';
         }
 
         function showErrorState() {
             document.getElementById('loadingState').style.display = 'none';
             document.getElementById('errorState').style.display = 'block';
+            document.getElementById('emptyCategoryState').style.display = 'none';
+            document.getElementById('cameraGrid').style.display = 'none';
+        }
+
+        function showEmptyCategoryState() {
+            document.getElementById('loadingState').style.display = 'none';
+            document.getElementById('errorState').style.display = 'none';
+            document.getElementById('emptyCategoryState').style.display = 'block';
             document.getElementById('cameraGrid').style.display = 'none';
         }
 
@@ -1207,18 +1484,35 @@
             const grid = document.getElementById('cameraGrid');
             grid.innerHTML = '';
 
-            if (cameras.length === 0) {
-                grid.innerHTML = `
-                    <div class="error-state" style="grid-column: 1 / -1;">
-                        <i class="fas fa-video-slash"></i>
-                        <h3>Aktif yayın bulunamadı</h3>
-                        <p>Şu anda canlı yayın yapan kamera bulunmuyor.</p>
-                    </div>
-                `;
+            // Kategoriye göre filtrele
+            let filteredCameras = cameras;
+            if (selectedCategoryId !== null) {
+                filteredCameras = cameras.filter(camera =>
+                    camera.categories && camera.categories.some(cat => cat.id === selectedCategoryId)
+                );
+            }
+
+            if (filteredCameras.length === 0) {
+                if (selectedCategoryId === null) {
+                    // Hiç yayın yok
+                    grid.innerHTML = `
+                        <div class="error-state" style="grid-column: 1 / -1;">
+                            <i class="fas fa-video-slash"></i>
+                            <h3>Aktif yayın bulunamadı</h3>
+                            <p>Şu anda canlı yayın yapan kamera bulunmuyor.</p>
+                        </div>
+                    `;
+                } else {
+                    // Seçilen kategoride yayın yok
+                    showEmptyCategoryState();
+                }
                 return;
             }
 
-            cameras.forEach(camera => {
+            document.getElementById('emptyCategoryState').style.display = 'none';
+            document.getElementById('cameraGrid').style.display = 'grid';
+
+            filteredCameras.forEach(camera => {
                 const cameraCard = createCameraCard(camera);
                 grid.appendChild(cameraCard);
             });
@@ -1243,6 +1537,16 @@
 
             const viewerCount = viewerCounts[camera.id] || camera.viewers || 0;
 
+            // Kategori badge'lerini oluştur
+            let categoryBadges = '';
+            if (camera.categories && camera.categories.length > 0) {
+                categoryBadges = camera.categories.map(cat =>
+                    `<span class="camera-category-badge" style="background-color: ${cat.color}">
+                        ${iconMap[cat.icon] || '📷'} ${cat.name}
+                    </span>`
+                ).join('');
+            }
+
             card.innerHTML = `
                 <div class="camera-preview">
                     <video id="video-${camera.id}" muted loop controls style="display: none;"></video>
@@ -1258,6 +1562,7 @@
                 </div>
                 <div class="camera-info">
                     <div class="camera-name">${camera.name}</div>
+                    ${categoryBadges ? `<div class="camera-categories">${categoryBadges}</div>` : ''}
                     <div class="camera-details">
                         <div class="camera-location">
                             <i class="fas fa-map-marker-alt"></i>
@@ -1318,7 +1623,6 @@
             const btnText = document.getElementById(`btn-text-${cameraId}`);
             const playBtn = document.getElementById(`play-btn-${cameraId}`);
 
-            // Loading state
             if (btnText) btnText.textContent = 'Yükleniyor...';
             if (btnIcon) btnIcon.className = 'fas fa-spinner fa-spin';
             if (playBtn) playBtn.disabled = true;
@@ -1441,16 +1745,6 @@
                 if (playIcon) playIcon.className = 'fas fa-pause';
                 if (btnIcon) btnIcon.className = 'fas fa-pause';
                 if (btnText) btnText.textContent = 'Durdur';
-                if (playBtn) {
-                    playBtn.classList.add('playing');
-                    playBtn.disabled = false;
-                }
-            } else {
-                if (video) video.style.display = 'none';
-                if (placeholder) placeholder.style.display = 'flex';
-                if (playIcon) playIcon.className = 'fas fa-play';
-                if (btnIcon) btnIcon.className = 'fas fa-play';
-                if (btnText) btnText.textContent = 'Oynat';
                 if (playBtn) {
                     playBtn.classList.remove('playing');
                     playBtn.disabled = false;

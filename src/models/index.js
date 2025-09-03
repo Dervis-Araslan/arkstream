@@ -2,7 +2,7 @@ const { sequelize } = require('../config/database');
 const User = require('./user');
 const { Camera } = require('./camera');
 const { Stream } = require('./camera');
-const { Category } = require('./camera');
+const { Category, StreamCategory } = require('./camera');
 
 // Define associations here when we add more models
 // Example:
@@ -15,5 +15,6 @@ module.exports = {
     Camera,
     User,
     Stream,
-    Category
+    Category,
+    StreamCategory
 };
